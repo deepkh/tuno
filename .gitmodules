@@ -1,0 +1,6 @@
+[submodule "libex"]
+	path = libex
+	url = https://github.com/deepkh/libex.git
+[submodule "mk"]
+	path = mk
+	url = https://github.com/deepkh/mk.git
