@@ -205,8 +205,7 @@ int main(int argc, char* argv[]) {
 [
   {
     "url": {
-      //"host" : "127.0.0.1",
-      "host" : "192.168.4.22",
+      "host" : "127.0.0.1",
       "path" : "/upload",
       "port" : 1443,
       "ssl" : true,
@@ -217,8 +216,7 @@ int main(int argc, char* argv[]) {
 
   {
     "url": {
-      //"host" : "127.0.0.1",
-      "host" : "192.168.4.22",
+      "host" : "127.0.0.1",
       "path" : "/dwload/test_file/10m.bin",
       "port" : 1443,
       "ssl" : true,

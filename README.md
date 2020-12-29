@@ -1,4 +1,4 @@
-## A C/C++ based async/non-block socket library by use libevent and openssl for linux and windows
+## C/C++ based async/non-block socket library by use libevent and openssl for linux and windows
 
 Due to coding the client/server async/non-block socket program by use C/C++ is difficulty comapre to modern language like golang, python, rust,... But some legacy system or embbeded system or some system need high frequency still need low level C/C++ to build their system. 
 
