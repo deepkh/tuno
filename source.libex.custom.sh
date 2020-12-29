@@ -12,23 +12,19 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-if [ ! -z "$1" ]; then
-	unset TUNO 
-	unset TUNO_PHONY 
-	unset TUNO_PHONY_CLEAN
-
-	if [ "${HAVE_PRJ_TUNO}" = "1" ]; then
-		export TUNO="$1"
-		export TUNO_PHONY="TUNO"
-		export TUNO_PHONY_CLEAN="TUNO_CLEAN"
-		echo "TUNO=${TUNO}"
-	fi
-else
-	export HAVE_PRJ_TUNO=1
-	export HAVE_LIB_EXTERNAL=1
-	export HAVE_LIB_TUNO=1
-	export HAVE_BIN_TUNOSAMPLES=1
-
-	# load global env
-	source mk/source.sh
+if [ -z "${HAVE_LIB_SYS}" ];then
+	export HAVE_LIB_SYS=1
 fi
+
+if [ -z "${HAVE_LIB_OPENSSL}" ];then
+	export HAVE_LIB_OPENSSL=1
+fi
+
+if [ -z "${HAVE_LIB_EVENT}" ];then
+	export HAVE_LIB_EVENT=1
+fi
+
+if [ -z "${HAVE_LIB_JSONCPP}" ];then
+	export HAVE_LIB_JSONCPP=1
+fi
+
