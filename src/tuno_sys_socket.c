@@ -14,6 +14,7 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 #include <libtuno/tuno_sys_socket.h>
+#include "openssl_hostname_validation.h"
 
 static void tuno_sys_socket_library_ssl_init() {
   SSL_library_init();
@@ -392,6 +393,212 @@ int tuno_sys_socket_ssl_accept(SSL *ssl)
 finally:
   return 0;
 error:
+  return -1;
+}
+
+static int read_file_to_buf(const char *file_name, char **buf)
+{
+  int ret = -1;
+  size_t rd = 0;
+  int64_t rd_total = 0;
+  int64_t length = 0;
+  FILE *fp = fopen(file_name, "rb");
+
+  if (fp == NULL) {
+    tunosetmsg("failed to open %s", file_name);
+    goto finally;
+  }
+
+  fseek(fp, 0L, SEEK_END);
+  length = (int64_t) ftell(fp);
+  fseek(fp, 0L, SEEK_SET);
+
+#if 0
+  if (length >= (int64_t)buf_size) {
+    tunosetmsg("%s buf overflow %" PRId64 " >= %d", file_name, length, buf_size);
+    goto finally;
+  }
+#endif
+  *buf = (char *) malloc(length + 1);
+
+  while(rd_total < length) {
+    rd = fread((*buf)+rd_total, 1, 4096, fp);
+    if (rd == 0) {
+      break;
+    }
+    rd_total += (int64_t) rd;
+  }
+  (*buf)[rd_total] = '\0';
+
+  ret = 0;
+finally:
+  if (fp) {
+    fclose(fp);
+  }
+  return ret;
+}
+
+int tuno_sys_socket_ssl_add_ca_cert_file(SSL_CTX *ssl_ctx, const char *ssl_ca_cert_file)
+{
+  int ret = -1;
+  char *ca_cert_buf = NULL;
+  char *ca_cert_chunk_buf = (char*) malloc(16*1024);
+
+  char *ca_start;
+  char *ca_end;
+  char *p1;
+  char *p2;
+  int len;
+
+  X509 *cert = NULL;
+  BIO *bio = NULL;
+  
+  if (read_file_to_buf(ssl_ca_cert_file, &ca_cert_buf)) {
+    tunosetmsg2();
+    goto finally;
+  }
+  
+  //tunolog("CA %d\n%s\n", strlen(ca_cert_buf), ca_cert_buf);
+
+  if ((bio = BIO_new(BIO_s_mem())) == NULL) {
+    tunosetmsg("failed to BIO_new");
+    goto finally;
+  }
+
+  ca_start = ca_cert_buf;
+  ca_end = ca_start + strlen(ca_cert_buf);
+  while(ca_start < ca_end) {
+    p1 = strstr(ca_start, "-----BEGIN CERTIFICATE-----");
+    p2 = strstr(ca_start, "-----END CERTIFICATE-----");
+    
+    if (p1 == NULL || p2 == NULL) {
+      break;
+    }
+
+    len = (p2 + 25) - p1 + 1;
+    //tunolog("cert len:%d '%s'", len, ca_start);
+    memcpy(ca_cert_chunk_buf, p1, len);
+    ca_cert_chunk_buf[len] = 0;
+    //tunolog("add CA of \n%s\n", ca_cert_chunk_buf);
+
+    BIO_puts(bio, ca_cert_chunk_buf);
+
+    if ((cert = PEM_read_bio_X509(bio, NULL, 0, NULL)) == NULL) {
+      tunosetmsg("failed to PEM_read_bio_X509");
+      goto finally;
+    }
+
+    X509_STORE_add_cert(SSL_CTX_get_cert_store(ssl_ctx), cert);
+    ca_start += len;
+  }
+
+  ret = 0;
+finally:
+  if (bio) {
+    BIO_free(bio);
+  }
+  if (cert) {
+    X509_free(cert);
+  }
+  if (ca_cert_buf) {
+    free(ca_cert_buf);
+  }
+  if (ca_cert_chunk_buf) {
+    free(ca_cert_chunk_buf);
+  }
+  return ret;
+}
+
+static void cert_dump(X509 *cert, int res)
+{
+	char *line;
+	const char *res_str = "NULL";
+	tunolog("Server certificates:");
+	line = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
+	tunolog("Subject: %s", line);
+	free(line);       /* free the malloc'ed string */
+	line = X509_NAME_oneline(X509_get_issuer_name(cert), 0, 0);
+	tunolog("Issuer: %s", line);
+	free(line);       /* free the malloc'ed string */
+		
+	switch (res) {
+		case MatchFound:
+			res_str = "MatchFound";
+			break;
+		case MatchNotFound:
+			res_str = "MatchNotFound";
+			break;
+		case NoSANPresent:
+			res_str = "NoSANPresent";
+			break;
+		case MalformedCertificate:
+			res_str = "MalformedCertificate";
+			break;
+		case Error:
+			res_str = "Error";
+			break;
+		default:
+			res_str = "WTF!";
+			break;
+	}
+
+	tunolog("res_str: %s", res_str);
+}
+
+int tuno_sys_socket_ssl_cert_verify_results(SSL* ssl_skfd, const char *ssl_verify_hostname)
+{
+  X509 *x509 = NULL;
+  int res;
+  long verify;
+
+  //1. check CA bundle is ok or not. ex: Let's Encrypt X3 CA
+  verify = SSL_get_verify_result(ssl_skfd);
+  if (verify == X509_V_OK) {
+    tunolog("ssl verify ok");
+  } else if ((verify == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT)
+      || (verify ==X509_V_ERR_CERT_NOT_YET_VALID)
+      || (verify == X509_V_ERR_CERT_HAS_EXPIRED)) {
+    tunolog("ssl partial ok");
+    if (verify == X509_V_ERR_CERT_HAS_EXPIRED) {
+      tunolog("PARTIAL OK X509_V_ERR_CERT_HAS_EXPIRED");
+    }
+  } else {
+    tunolog("ssl verify failed %d '%s'", verify, X509_verify_cert_error_string(verify));
+    goto error;
+  }
+
+  //2. check the domain name. ex: netsync.tv, my.netsync.tv
+  if ((x509 = SSL_get_peer_certificate(ssl_skfd)) == NULL) {
+    tunolog("failed to get peer x509 cert");
+    goto error;
+  }
+  
+  //3. Check common name (general) or dns name (cloudflare)
+  res = openssl_validate_hostname(ssl_verify_hostname, x509);
+
+  //4. check peer x509 cert expiered time
+  if (openssl_validate_expired_time(x509)) {
+    tunosetmsg2();
+    tunolog(tunogetmsg());
+    cert_dump(x509, 0);
+    goto error;
+  }
+
+  if (res != MatchFound) {
+    cert_dump(x509, res);
+    X509_free(x509);
+    tunolog("failed to validate hostname %d", res);
+    goto error;
+  }
+  
+  tunolog("%s cert name verify ok", ssl_verify_hostname);
+  cert_dump(x509, res);
+  X509_free(x509);
+  return 0;
+error:
+  if (x509) {
+    X509_free(x509);
+  }
   return -1;
 }
 

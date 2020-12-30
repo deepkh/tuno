@@ -127,6 +127,7 @@ char *tuno_sys_socket_hostname_to_ip(const char *hostname, int flag);
 int tuno_sys_socket_connect(int skfd, char *host, int port, int is_ipv6);
 int tuno_sys_socket_ssl_connect(SSL *ssl);
 int tuno_sys_socket_ssl_accept(SSL *ssl);
-
+int tuno_sys_socket_ssl_add_ca_cert_file(SSL_CTX *ssl_ctx, const char *ssl_ca_cert_file);
+int tuno_sys_socket_ssl_cert_verify_results(SSL* ssl_skfd, const char *ssl_verify_hostname);
 
 #endif

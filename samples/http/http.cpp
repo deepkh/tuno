@@ -77,6 +77,25 @@ std::string &Http::Header::GetHeaderString() {
   return header_;
 };
 
+std::string Http::Header::find_header_value(const char *key)
+{
+  int key_len = strlen(key);
+  std::string transfer_encoding = "";
+  size_t pos_start;
+  if ((pos_start = header_.find(key)) == std::string::npos) {
+    return transfer_encoding;
+  }
+
+  size_t pos_end;
+  if ((pos_end = header_.find("\r\n", pos_start)) == std::string::npos) {
+    return transfer_encoding;
+  }
+
+  transfer_encoding = header_.substr(pos_start + key_len, pos_end - pos_start - key_len);
+  return transfer_encoding;
+}
+
+
 int64_t Http::Header::GetContentLength() {
   int64_t content_length = -1;
   if (get_head_int64_val(header_.c_str(), "Content-Length: ", &content_length)) {
@@ -100,19 +119,18 @@ void Http::Header::AppendHeader(const char *fmt, ...) {
 
 std::string Http::Header::GetAttachmentFilename()
 {
-  std::string file_name = "";
-  size_t pos_start;
-  if ((pos_start = header_.find("Content-Disposition: attachment; filename=")) == std::string::npos) {
-    return file_name;
-  }
+  return find_header_value("Content-Disposition: attachment; filename=");
+}
 
-  size_t pos_end;
-  if ((pos_end = header_.find("\r\n", pos_start)) == std::string::npos) {
-    return file_name;
-  }
+std::string Http::Header::GetTransferEncoding()
+{
+  return find_header_value("Transfer-Encoding: ");
+}
 
-  file_name = header_.substr(pos_start + 42, pos_end - pos_start - 42);
-  return file_name;
+bool Http::Header::IsChunkedEncoding()
+{
+  std::string chunked = GetTransferEncoding();
+  return chunked.compare("chunked") == 0 ? true : false;
 }
 
 /************************************************
@@ -179,6 +197,61 @@ std::shared_ptr<Http::Status> Http::InputStream::GetStatus() {
 std::shared_ptr<Http::Header> Http::InputStream::GetHeader() {
   return header_;
 };
+
+static int parse_chunk_size(std::string &chunk_buf, int &chunk_size_str_length)
+{
+    int chunk_size;
+    char *p;
+
+    std::string chunk_size_str = chunk_buf.substr(0, chunk_buf.find("\r\n"));
+    chunk_size_str_length = chunk_size_str.length();
+    chunk_size = strtol( chunk_size_str.c_str(), & p, 16 );
+    if (*p != 0) {
+        tunolog("XX\n%s\n", chunk_size_str.c_str());
+        return -1;
+    }
+    return chunk_size;
+}
+
+int Http::InputStream::ReadChunkString(std::string &chunk_str)
+{
+  char *buf = Buf();
+  int len = BufLen();
+
+  if (len == 0) {
+    return TUNO_STATUS_DONE;
+  }
+
+  chunk_buf_.append(buf, len);
+  BufRemove(len);
+
+  if(chunk_buf_.length() > 0) {
+    //parse chunk_size
+    int chunk_size_str_length = 0;
+    int chunk_size = parse_chunk_size(chunk_buf_, chunk_size_str_length);
+    if (chunk_size == 0) {
+      //tunolog("size:%d", chunk_size);
+      return TUNO_STATUS_DONE;
+    } else if (chunk_size < 0) {
+      return TUNO_STATUS_ERROR;
+    }
+
+    //read chunk data
+    if ((int)chunk_buf_.length() >= (chunk_size_str_length+2 + chunk_size+2)) {
+      chunk_buf_.erase(0, chunk_size_str_length + 2);
+      //tunolog("size:%d", chunk_size);
+      
+      chunk_str = chunk_buf_.substr(0, chunk_size);
+      //tunolog("data:%s", chunk_str.c_str());
+      chunk_buf_.erase(0, chunk_size+2);
+      //if (chunk_buf_.length() > 0) {
+        //tunolog("remain:%d '%s'", chunk_buf_.length(), chunk_buf_.c_str());
+      //}
+    }
+  }
+
+  return TUNO_STATUS_NOT_DONE;
+}
 
 
 /************************************************

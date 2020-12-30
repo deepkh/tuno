@@ -44,7 +44,8 @@ LDFLAGS = $(LDFLAGS_PRE) -Wl,-Bdynamic $(LIBOPENSSL_LDFLAGS) $(LIBEVENT_LDFLAGS)
 LIB_C_FILE += \
 		tuno_log.c \
 		tuno_sys_socket.c \
-		tuno_socket.c
+		tuno_socket.c \
+		openssl_hostname_validation.c
 OBJS_DIR=$(TARGET_DLL_BASE_DIR)
 LIB_C_OBJS = $(addprefix $(OBJS_DIR)/, $(LIB_C_FILE:.c=.o))
 LIB_C_OBJS_CLEAN = $(addsuffix _clean,$(LIB_C_OBJS))

@@ -549,6 +549,17 @@ static void tuno_ev_check_connect(evutil_socket_t ev_sk, short event, void *arg)
         goto finally;
       }
       tunolog("SSL OK");
+
+      //check cert
+      if (tuno_socket_is_client(sk) && sk->ssl_ca_cert_file && sk->ssl_verify_hostname) {
+        if (tuno_sys_socket_ssl_cert_verify_results(sk->ssl, sk->ssl_verify_hostname)) {
+          tunosetmsg("failed to verify cert");
+          error = -1;
+          ret = -1;
+          goto finally;
+        }
+      }
+
       sk->flag |= TUNO_SOCKET_FLAG_SSL_CONNECTED;
     }
   
@@ -592,7 +603,10 @@ struct tuno_socket *tuno_socket_connect(
   , struct evdns_base *ev_dns
   , char *host, int port
   , int flag, struct timeval *timeout
-  , void *lparam, void *rparam)
+  , void *lparam, void *rparam
+  , const char *ssl_ca_cert_file
+  , const char *ssl_verify_hostname
+  )
 {
   struct tuno_socket *sk = NULL;
   int skfd = -1;
@@ -607,6 +621,8 @@ struct tuno_socket *tuno_socket_connect(
   sk->protocol = protocol;
   sk->lparam = lparam;
   sk->rparam = rparam;
+  sk->ssl_ca_cert_file = ssl_ca_cert_file;
+  sk->ssl_verify_hostname = ssl_verify_hostname;
 
 #if 0
   if (bufferevent_tuno_sys_socket_connect_hostname(sk->bev, ev_dns, AF_UNSPEC, host, port) < 0) {
@@ -666,6 +682,13 @@ struct tuno_socket *tuno_socket_connect(
     tunosetmsg("failed to SSL_CTX_new");
     ERR_print_errors_fp(stderr);
     goto error;
+  }
+
+  if (sk->ssl_ca_cert_file && sk->ssl_verify_hostname) {
+    if (tuno_sys_socket_ssl_add_ca_cert_file(sk->ssl_ctx, sk->ssl_ca_cert_file)) {
+      tunosetmsg2();
+      goto error;
+    }
   }
 
   if ((sk->ssl = SSL_new(sk->ssl_ctx)) == NULL) {

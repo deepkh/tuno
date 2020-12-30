@@ -140,6 +140,9 @@ public:
 private:
   std::shared_ptr<Http::ContentHandlerFactory> content_handler_factory_;
   std::shared_ptr<HttpServer::ReadContentHandler> read_content_handler_;
+  bool chunked_mode_ = false;
+  int64_t read_length_ = 0;
+  int64_t content_length_ = -2;
 };
 
 /************************************************

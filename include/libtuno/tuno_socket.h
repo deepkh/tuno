@@ -132,6 +132,8 @@ struct tuno_socket {
 
   SSL *ssl;                     //for ssl
   SSL_CTX *ssl_ctx;                 //ssl ctx
+  const char *ssl_ca_cert_file;      //for client 
+  const char *ssl_verify_hostname;//for client
   
   tuno_buf *rbuf;                   //always for caching read buffer
   tuno_buf *wbuf;                   //always for caching read buffer
@@ -218,7 +220,11 @@ struct tuno_socket *tuno_socket_connect(
   , struct evdns_base *ev_dns
   , char *host, int port
   , int flag, struct timeval *timeout
-  , void *lparam, void *rparam);
+  , void *lparam, void *rparam
+  , const char *ssl_ca_cert_file
+  , const char *ssl_verify_hostname);
+
+
 
 /* server listener & accept (non-block) */
 struct tuno_listener *tuno_listener_new(

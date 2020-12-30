@@ -424,7 +424,48 @@ int HttpServer::DefaultPutHandler::DoRequest(std::shared_ptr<Http::Context> cont
     tunosetmsg("read_content_handler_.get() is null");
     return TUNO_STATUS_ERROR;
   }
-  return read_content_handler_->DoReadContent(context);
+
+  //check content-length mode or chunk mode
+  if (content_length_ == -2) {
+    content_length_ = context->Instream()->GetHeader()->GetContentLength();
+    if (content_length_ == -1) {
+      if (!context->Instream()->GetHeader()->IsChunkedEncoding()) {
+        tunosetmsg("unsupported transfer encoding");
+        return TUNO_STATUS_ERROR;
+      }
+      chunked_mode_ = true;
+    }
+  }
+
+  if (!chunked_mode_) {
+    //Content-Length mode
+    char *buf = context->Instream()->Buf();
+    int len = context->Instream()->BufLen();
+    int ret = read_content_handler_->DoReadContentByLength(context, buf, len);
+    context->Instream()->BufRemove(len);
+    read_length_ += len;
+    if (ret) {
+      tunosetmsg2();
+      return TUNO_STATUS_ERROR;
+    }
+
+    if ((content_length_ >= 0 && read_length_ >= content_length_)) {
+      return TUNO_STATUS_DONE;
+    }
+  } else {
+    //Chunked mode
+    std::string chunk_str = "";
+    int ret = context->Instream()->ReadChunkString(chunk_str);
+
+    if (!chunk_str.empty()) {
+      if (read_content_handler_->DoReadContentByChunkString(context, chunk_str)) {
+        return TUNO_STATUS_ERROR;
+      }
+    }
+    return ret; 
+  }
+  
+  return TUNO_STATUS_NOT_DONE;
 };
 
 int HttpServer::DefaultPutHandler::DoResponse(std::shared_ptr<Http::Context> context) 

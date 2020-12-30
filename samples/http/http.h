@@ -40,10 +40,14 @@ public:
   Header();
   ~Header();
   int SetHeaderString(char *buf, int size);
+  std::string find_header_value(const char *key);
+  
   std::string &GetHeaderString();
   int64_t GetContentLength();
   void AppendHeader(const char *fmt, ...);
   std::string GetAttachmentFilename();
+  std::string GetTransferEncoding();
+  bool IsChunkedEncoding();
 
 private:
   std::string header_;
@@ -86,10 +90,13 @@ public:
   std::shared_ptr<Header> GetHeader();
   std::shared_ptr<Status> GetStatus();
 
+  int ReadChunkString(std::string &chunk_str);
+
 private:
   struct tuno_socket *sk_ = nullptr;
   std::shared_ptr<Header> header_;
   std::shared_ptr<Status> status_;
+  std::string chunk_buf_;
 };
 
 /************************************************
@@ -158,7 +165,8 @@ private:
 class ReadContentHandler {
 public:
   virtual int Init(std::shared_ptr<Context> context) = 0;
-  virtual int DoReadContent(std::shared_ptr<Http::Context> context) = 0;
+  virtual int DoReadContentByLength(std::shared_ptr<Http::Context> context, char *buf, int size) = 0;
+  virtual int DoReadContentByChunkString(std::shared_ptr<Http::Context> context, std::string &chunk_str) = 0;
   virtual int Finish(std::shared_ptr<Http::Context> context, int error) = 0;
 };
 

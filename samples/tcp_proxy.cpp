@@ -207,6 +207,7 @@ int tuno_protocol_tcp_proxy_server_read(struct tuno_socket *sk)
         , param->forward_host                 //forward host
         , param->forward_port                 //forward port
         , param->client_ssl ? TUNO_SOCKET_FLAG_SSL : 0, &timeout                      //ssl
+        , NULL, NULL
         , NULL, NULL)) == NULL) {
       tunosetmsg2();
       goto error;

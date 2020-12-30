@@ -30,18 +30,24 @@ public:
   };
 
   virtual int Init(std::shared_ptr<Http::Context> context) override {
-    if (fws.get() != nullptr) {
-      fws = std::shared_ptr<fs::FileWriteStream>();
+    if (fws_.get() != nullptr) {
+      fws_ = std::shared_ptr<fs::FileWriteStream>();
     }
 
+    //create output file
     std::string path = context->GetURL()->Path();
+
+    if (path.at(path.length()-1) == '/') {
+      path = "/index.htm";
+    }
+
     std::string file_name = path.substr(path.rfind("/")+1);
     file_name_ = file_name;
     file_name = std::string("download/") + file_name;
     fs::mkdir("download");
 
-    fws = std::shared_ptr<fs::FileWriteStream>(new fs::FileWriteStream());
-    if (fws->Open(file_name)) {
+    fws_ = std::shared_ptr<fs::FileWriteStream>(new fs::FileWriteStream());
+    if (fws_->Open(file_name)) {
       tunosetmsg("failed to open %s", path.c_str());
       return -1;
     }
@@ -49,40 +55,39 @@ public:
     return 0;
   };
 
-  virtual int DoReadContent(std::shared_ptr<Http::Context> context) override {
-    char *buf = context->Instream()->Buf();
-    int len = context->Instream()->BufLen();
-
-    if (content_length == 0) {
-      content_length = context->Instream()->GetHeader()->GetContentLength();
+  virtual int DoReadContentByLength(std::shared_ptr<Http::Context> context, char *buf, int size) override {
+    if (content_length_ == -2) {
+      content_length_ = context->Instream()->GetHeader()->GetContentLength();
     }
-
-    fws->Write(buf, len);
-    //tunolog("%s", buf);
-    context->Instream()->BufRemove(len);
-    tunolog("loading %s %" PRId64 "/%" PRId64 , file_name_.c_str(), fws->WriteSize(), content_length);
-    if (content_length > 0) {
-      if (fws->WriteSize() >= content_length) {
-        tunolog("loading DONE %s %" PRId64 "/%" PRId64 , file_name_.c_str(), fws->WriteSize(), content_length);
-        goto finish;
-      }
+   
+    fws_->Write(buf, size);
+    //tunolog("\"%s\"", buf);
+  
+    tunolog("loading %s %" PRId64 "/%" PRId64 , file_name_.c_str(), fws_->WriteSize(), content_length_);
+    if ((content_length_ >= 0 && fws_->WriteSize() >= content_length_)) {
+      tunolog("loading DONE %s %" PRId64 "/%" PRId64 
+          , file_name_.c_str(), fws_->WriteSize(), content_length_);
     }
-
     return 0;
-  finish:
-    return TUNO_STATUS_DONE;
+  };
+
+  virtual int DoReadContentByChunkString(std::shared_ptr<Http::Context> context, std::string &chunk_str) override {
+    fws_->Write((char *)chunk_str.c_str(), chunk_str.size());
+    tunolog("loading (chunk) %s %" PRId64 "", file_name_.c_str(), fws_->WriteSize());
+    return 0;
   };
 
   virtual int Finish(std::shared_ptr<Http::Context> context, int error) override {
-    if (fws.get() != nullptr) {
-      fws = std::shared_ptr<fs::FileWriteStream>();
+    if (fws_.get() != nullptr) {
+      fws_ = std::shared_ptr<fs::FileWriteStream>();
     }
     return 0;
   };
 
 private:
-  std::shared_ptr<fs::FileWriteStream> fws;
-  int64_t content_length = 0;
+  std::shared_ptr<fs::FileWriteStream> fws_;
+  int64_t content_length_ = -2;
+  bool is_checked_ = false;
   std::string file_name_;
 };
 
@@ -170,7 +175,7 @@ private:
   std::string file_path_;
   std::string file_name_;
   std::shared_ptr<fs::FileReadStream> frs_;
-  char buf_[40960];
+  char buf_[4096];
 };
 
 
@@ -201,8 +206,36 @@ public:
 
 
 int main(int argc, char* argv[]) {
+  int index = -1;
+  int end_index = -1;
   std::string json_str = R"(
 [
+  {
+    "url": {
+      "host" : "www.nginx.com",
+      "path" : "/nginx-app-protect/admin-guide/install/",
+      "port" : 443,
+      "ssl" : true,
+      "method": 0,
+      "file_for_upload": "",
+      "ssl_do_cert_verify": true,
+      "ssl_ca_cert_file": "/etc/ssl/certs/ca-certificates.crt"
+    }
+  },
+
+  {
+    "url": {
+      "host" : "netsync.tv",
+      "path" : "/",
+      "port" : 443,
+      "ssl" : true,
+      "method": 0,
+      "file_for_upload": "",
+      "ssl_do_cert_verify": true,
+      "ssl_ca_cert_file": "/etc/ssl/certs/ca-certificates.crt"
+    }
+  },
+
   {
     "url": {
       "host" : "127.0.0.1",
@@ -210,7 +243,9 @@ int main(int argc, char* argv[]) {
       "port" : 1443,
       "ssl" : true,
       "method": 1,
-      "file_for_upload": "test_file/10m.bin"
+      "file_for_upload": "test_file/10m.bin",
+      "ssl_do_cert_verify": true,
+      "ssl_ca_cert_file": "x509.crt"
     }
   },
 
@@ -239,7 +274,9 @@ int main(int argc, char* argv[]) {
       "path" : "/debian-cd/10.7.0/amd64/iso-dvd/MD5SUMS",
       "port" : 443,
       "ssl" : true,
-      "method": 0
+      "method": 0,
+      "ssl_do_cert_verify": true,
+      "ssl_ca_cert_file": "/etc/ssl/certs/ca-certificates.crt"
     }
   }
 ]
@@ -260,7 +297,8 @@ int main(int argc, char* argv[]) {
   }
 
   if (url_factory->Init(json_str)) {
-    tunolog("failed to Http::Parallel()");
+    tunosetmsg2();
+    tunolog("%s", tunogetmsg());
     goto finally;
   }
 
@@ -270,11 +308,33 @@ int main(int argc, char* argv[]) {
   }
 
   if (parallel->Init(ev_base, default_handler_factory)) {
-    tunolog("failed to Http::Parallel()");
+    tunosetmsg2();
+    tunolog("%s", tunogetmsg());
     goto finally;
   }
 
+  if (argc >= 2) {
+    index = atoi(argv[1]);
+  }
+  
+  if (argc == 3) {
+    end_index = atoi(argv[2]);
+  }
+
+  tunolog("%d %d", index, end_index);
   while((url = std::dynamic_pointer_cast<HttpClient::URL>(url_factory->NextURL())).get() != nullptr) {
+    if (index != -1 && end_index != -1) {
+      if (!(i >= index && i <= end_index)) {
+        i++;
+        continue;
+      }
+    } else if (index != -1) {
+      if (index != i) {
+        i++;
+        continue;
+      }
+    }
+
     tunolog("\n%d", i++);
     tunolog("\thost = %s", url->Host().c_str());
     tunolog("\tport = %d", url->Port());
@@ -282,11 +342,14 @@ int main(int argc, char* argv[]) {
     tunolog("\tpath = %s", url->Path().c_str());
     tunolog("\tfile_for_upload = %s", url->FileForUpload().c_str());
 
-    parallel->Connect(url);
+    if (parallel->Connect(url)) {
+      tunosetmsg2();
+      tunolog(tunogetmsg());
+      break;
+    }
   }
 
   while(event_base_loop(ev_base, EVLOOP_ONCE | EVLOOP_NONBLOCK) == 0) {
-    ;
   }
   //or loop forever by use
   //event_base_dispatch(ev_base);

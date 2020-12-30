@@ -30,6 +30,8 @@ int HttpClient::URL::Init(Json::Value &json_obj) {
   json_obj_ = json_obj;
   host_ = json_obj_["host"].asString();
   path_ = json_obj_["path"].asString();
+  ssl_ca_cert_file_ = json_obj_["ssl_ca_cert_file"].asString();
+  ssl_verify_hostname_ = json_obj_["ssl_verify_hostname"].asString();
   file_for_upload_ = json_obj_["file_for_upload"].asString();
   return 0;
 };
@@ -62,6 +64,14 @@ std::string &HttpClient::URL::FileForUpload()
 Json::Value &HttpClient::URL::JsonObj()
 {
   return json_obj_;
+};
+
+bool HttpClient::URL::SSLDoCertVerify() {
+  return json_obj_["ssl_do_cert_verify"].asBool();
+};
+
+std::string &HttpClient::URL::SSLCaCertFile() {
+  return ssl_ca_cert_file_;
 };
 
 
@@ -222,8 +232,9 @@ int HttpClient::Parallel::Init(struct event_base *ev_base, std::shared_ptr<Http:
   return 0;
 };
 
-int HttpClient::Parallel::Connect(std::shared_ptr<Http::URL> url)
+int HttpClient::Parallel::Connect(std::shared_ptr<Http::URL> _url)
 {
+  std::shared_ptr<HttpClient::URL> url = std::dynamic_pointer_cast<HttpClient::URL>(_url);
   std::shared_ptr<Http::Handler> handler = handler_factory_->FindHandler(url);
   
   if (handler.get() == nullptr) {
@@ -235,7 +246,11 @@ int HttpClient::Parallel::Connect(std::shared_ptr<Http::URL> url)
   if ((sk = tuno_socket_connect(&protocol_, ev_base_, nullptr
       , (char *)url->Host().c_str(), url->Port()
       , url->IsSSL() ? TUNO_SOCKET_FLAG_SSL : 0
-      , &timeout_, nullptr, nullptr)) == NULL) {
+      , &timeout_
+      , nullptr, nullptr
+      , url->SSLDoCertVerify() ? url->SSLCaCertFile().c_str() : nullptr
+      , url->SSLDoCertVerify() ? url->Host().c_str() : nullptr
+      )) == NULL) {
     tunosetmsg2();
     return -1;
   }
@@ -332,7 +347,47 @@ int HttpClient::DefaultGetHandler::DoRequest(std::shared_ptr<Http::Context> cont
 
 int HttpClient::DefaultGetHandler::DoResponse(std::shared_ptr<Http::Context> context) 
 {
-  return read_content_handler_->DoReadContent(context);
+  //check content-length mode or chunk mode
+  if (content_length_ == -2) {
+    content_length_ = context->Instream()->GetHeader()->GetContentLength();
+    if (content_length_ == -1) {
+      if (!context->Instream()->GetHeader()->IsChunkedEncoding()) {
+        tunosetmsg("unsupported transfer encoding");
+        return TUNO_STATUS_ERROR;
+      }
+      chunked_mode_ = true;
+    }
+  }
+
+  if (!chunked_mode_) {
+    //Content-Length mode
+    char *buf = context->Instream()->Buf();
+    int len = context->Instream()->BufLen();
+    int ret = read_content_handler_->DoReadContentByLength(context, buf, len);
+    context->Instream()->BufRemove(len);
+    read_length_ += len;
+    if (ret) {
+      tunosetmsg2();
+      return TUNO_STATUS_ERROR;
+    }
+
+    if ((content_length_ >= 0 && read_length_ >= content_length_)) {
+      return TUNO_STATUS_DONE;
+    }
+  } else {
+    //Chunked mode
+    std::string chunk_str = "";
+    int ret = context->Instream()->ReadChunkString(chunk_str);
+
+    if (!chunk_str.empty()) {
+      if (read_content_handler_->DoReadContentByChunkString(context, chunk_str)) {
+        return TUNO_STATUS_ERROR;
+      }
+    }
+    return ret; 
+  }
+  
+  return TUNO_STATUS_NOT_DONE;
 }
 
 int HttpClient::DefaultGetHandler::Finish(std::shared_ptr<Http::Context> context, int error) 

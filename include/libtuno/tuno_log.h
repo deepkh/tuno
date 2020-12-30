@@ -35,7 +35,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#define DBG_MSG_LEN 4096
+#define DBG_MSG_LEN 40960
 extern char _tunomsg[DBG_MSG_LEN];
 extern char _tunomsg_2[DBG_MSG_LEN];
 

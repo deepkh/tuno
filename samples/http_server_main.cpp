@@ -36,26 +36,26 @@ public:
     file_name_ = path;
     path = server_config_["http_server"]["file_download_path"].asString() + path;
 
-    if (frs.get() != nullptr) {
-      frs = std::shared_ptr<fs::FileReadStream>();
+    if (frs_.get() != nullptr) {
+      frs_ = std::shared_ptr<fs::FileReadStream>();
     }
 
-    frs = std::shared_ptr<fs::FileReadStream>(new fs::FileReadStream());
-    if (frs->Open(path)) {
+    frs_ = std::shared_ptr<fs::FileReadStream>(new fs::FileReadStream());
+    if (frs_->Open(path)) {
       tunosetmsg("failed to open %s", path.c_str());
       return -1;
     }
     
-    //tunolog("file:%s size: %" PRId64 "", path.c_str(), frs->Length());
+    //tunolog("file:%s size: %" PRId64 "", path.c_str(), frs_->Length());
     return 0;
   };
 
   virtual int StatusCode(std::shared_ptr<Http::Context> context) override {
-    return frs->IsOpen() ? 200 : 404;
+    return frs_->IsOpen() ? 200 : 404;
   }
 
   virtual int64_t ContentLength(std::shared_ptr<Http::Context> context) override {
-    return frs->Length();
+    return frs_->Length();
   };
 
   virtual const char *ContentType(std::shared_ptr<Http::Context> context) override {
@@ -64,22 +64,22 @@ public:
 
   virtual int DoWriteContent(std::shared_ptr<Http::Context> context) override {
 
-    if (!frs->IsOpen()) {
+    if (!frs_->IsOpen()) {
       return TUNO_STATUS_DONE;
     }
 
-    size_t r = frs->Read(buf, sizeof(buf));
+    size_t r = frs_->Read(buf_, sizeof(buf_));
     if (r == 0) {
-      tunolog("writing (EOF) %" PRId64 "/%" PRId64 , frs->ReadSize(), frs->Length());
+      tunolog("writing (EOF) %" PRId64 "/%" PRId64 , frs_->ReadSize(), frs_->Length());
       return TUNO_STATUS_DONE;
     }
 
-    context->Outstream()->Write(buf, (int)r);
-    tunolog("writing %s %" PRId64 "/%" PRId64 , file_name_.c_str(), frs->ReadSize(), frs->Length());
+    context->Outstream()->Write(buf_, (int)r);
+    tunolog("writing %s %" PRId64 "/%" PRId64 , file_name_.c_str(), frs_->ReadSize(), frs_->Length());
 
-    if (frs->Length() > 0) {
-      if (frs->ReadSize() >= frs->Length()) {
-        tunolog("writing DONE %s %" PRId64 "/%" PRId64 , file_name_.c_str(), frs->ReadSize(), frs->Length());
+    if (frs_->Length() > 0) {
+      if (frs_->ReadSize() >= frs_->Length()) {
+        tunolog("writing DONE %s %" PRId64 "/%" PRId64 , file_name_.c_str(), frs_->ReadSize(), frs_->Length());
         return TUNO_STATUS_DONE;
       }
     }
@@ -88,8 +88,8 @@ public:
   };
 
   virtual int Finish(std::shared_ptr<Http::Context> context, int error) override {
-    if (frs.get() != nullptr) {
-      frs = std::shared_ptr<fs::FileReadStream>();
+    if (frs_.get() != nullptr) {
+      frs_ = std::shared_ptr<fs::FileReadStream>();
     }
     return 0;
   };
@@ -97,9 +97,9 @@ public:
 private:
   std::string path_prefix_;
   Json::Value server_config_;
-  std::shared_ptr<fs::FileReadStream> frs;
+  std::shared_ptr<fs::FileReadStream> frs_;
   std::string file_name_;
-  char buf[40960];
+  char buf_[4096];
 };
 
 
@@ -116,8 +116,8 @@ public:
   };
 
   virtual int Init(std::shared_ptr<Http::Context> context) override {
-    if (fws.get() != nullptr) {
-      fws = std::shared_ptr<fs::FileWriteStream>();
+    if (fws_.get() != nullptr) {
+      fws_ = std::shared_ptr<fs::FileWriteStream>();
     }
 
     std::string file_name = context->Instream()->GetHeader()->GetAttachmentFilename();
@@ -132,8 +132,8 @@ public:
     path += "/";
     path += file_name;
 
-    fws = std::shared_ptr<fs::FileWriteStream>(new fs::FileWriteStream());
-    if (fws->Open(path)) {
+    fws_ = std::shared_ptr<fs::FileWriteStream>(new fs::FileWriteStream());
+    if (fws_->Open(path)) {
       tunosetmsg("failed to open %s", path.c_str());
       return -1;
     }
@@ -142,7 +142,7 @@ public:
   };
 
   virtual int StatusCode(std::shared_ptr<Http::Context> context) override {
-    return fws->IsOpen() ? 200 : 501;
+    return fws_->IsOpen() ? 200 : 501;
   };
 
   virtual int64_t ContentLength(std::shared_ptr<Http::Context> context) override {
@@ -153,30 +153,26 @@ public:
     return "text/html";
   };
 
-  virtual int DoReadContent(std::shared_ptr<Http::Context> context) override {
-    char *buf = context->Instream()->Buf();
-    int len = context->Instream()->BufLen();
-
-    if (content_length == 0) {
-      content_length = context->Instream()->GetHeader()->GetContentLength();
+  virtual int DoReadContentByLength(std::shared_ptr<Http::Context> context, char *buf, int size) override {
+    if (content_length_ == -2) {
+      content_length_ = context->Instream()->GetHeader()->GetContentLength();
     }
-
-    fws->Write(buf, len);
-    //tunolog("%s", buf);
-    context->Instream()->BufRemove(len);
-    tunolog("loading %s %" PRId64 "/%" PRId64 
-        , file_name_.c_str()
-        , fws->WriteSize(), content_length);
-    if (content_length > 0) {
-      if (fws->WriteSize() >= content_length) {
-        tunolog("loading DONE %s %" PRId64 "/%" PRId64 , file_name_.c_str(), fws->WriteSize(), content_length);
-        goto finish;
-      }
+   
+    fws_->Write(buf, size);
+    //tunolog("\"%s\"", buf);
+  
+    tunolog("loading %s %" PRId64 "/%" PRId64 , file_name_.c_str(), fws_->WriteSize(), content_length_);
+    if ((content_length_ >= 0 && fws_->WriteSize() >= content_length_)) {
+      tunolog("loading DONE %s %" PRId64 "/%" PRId64 
+          , file_name_.c_str(), fws_->WriteSize(), content_length_);
     }
-
     return 0;
-  finish:
-    return TUNO_STATUS_DONE;
+  };
+
+  virtual int DoReadContentByChunkString(std::shared_ptr<Http::Context> context, std::string &chunk_str) override {
+    fws_->Write((char *)chunk_str.c_str(), chunk_str.size());
+    tunolog("loading (chunk) %s %" PRId64 "", file_name_.c_str(), fws_->WriteSize());
+    return 0;
   };
 
   virtual int DoWriteContent(std::shared_ptr<Http::Context> context) override {
@@ -184,16 +180,16 @@ public:
   };
 
   virtual int Finish(std::shared_ptr<Http::Context> context, int error) override {
-    if (fws.get() != nullptr) {
-      fws = std::shared_ptr<fs::FileWriteStream>();
+    if (fws_.get() != nullptr) {
+      fws_ = std::shared_ptr<fs::FileWriteStream>();
     }
     return 0;
   };
 
 private:
   Json::Value server_config_;
-  std::shared_ptr<fs::FileWriteStream> fws;
-  int64_t content_length = 0;
+  std::shared_ptr<fs::FileWriteStream> fws_;
+  int64_t content_length_ = -2;
   std::string file_name_;
 };
 

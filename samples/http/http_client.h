@@ -40,10 +40,15 @@ public:
   std::string &FileForUpload();
   Json::Value &JsonObj();
 
+  bool SSLDoCertVerify();
+  std::string &SSLCaCertFile();
+
 private:
   std::string host_;
   std::string path_;
   std::string file_for_upload_;
+  std::string ssl_ca_cert_file_;
+  std::string ssl_verify_hostname_;
   Json::Value json_obj_;
 };
 
@@ -133,6 +138,9 @@ public:
 private:
   std::shared_ptr<Http::ContentHandlerFactory> content_handler_factory_;
   std::shared_ptr<HttpClient::ReadContentHandler> read_content_handler_;
+  bool chunked_mode_ = false;
+  int64_t read_length_ = 0;
+  int64_t content_length_ = -2;
 };
 
 /***************************************************

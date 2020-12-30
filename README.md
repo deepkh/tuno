@@ -1,14 +1,13 @@
 ## C/C++ based async/non-block socket library by use libevent and openssl for linux and windows
 
-Due to coding the client/server async/non-block socket program by use C/C++ is difficulty comapre to modern language like golang, python, rust,... But some legacy system or embbeded system or some system need high frequency still need low level C/C++ to build their system. 
-
-This is a good start for who would like to understand how the async/non-block socket programming with SSL working by use C/C++.
+Due to coding the client/server async/non-block socket program by use C/C++ is difficulty comapre to modern language like golang, python, rust,... But some legacy system or embbeded system or some system need high frequency still need low level C/C++ to build their system. So This is a good start for who would like to understand how the async/non-block socket programming with SSL working by use C/C++.
 
 
 ## Features
 
 * libtuno is written in C 
 * Provide C++ wrapper for http client and http server in the sample code
+* Client side SSL cert checking and hostname verify are supported
 * Based on [OpenSSL](https://www.openssl.org/) for SSL support  
 * Based on [libevent](https://libevent.org/) for async/non-block architecture design 
 * Use GNU/GCC (6.3.0 20170516) to build target for linux_x86-64 

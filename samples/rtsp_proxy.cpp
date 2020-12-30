@@ -494,7 +494,9 @@ int tuno_protocol_rtsp_proxy_server_read(struct tuno_socket *sk)
         , (char *)sk->lparam      //forward host
         , atoi((char*)sk->rparam)     //forward port
         , 0, &timeout               //ssl, timeout
-        , NULL, NULL)) == NULL) {
+        , NULL, NULL
+        , NULL, NULL
+        )) == NULL) {
       tunosetmsg2();
       goto error;
     }
