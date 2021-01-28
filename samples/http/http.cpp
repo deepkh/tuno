@@ -28,6 +28,7 @@ static int get_head_val(const char *head, const char *key, char *val)
 	val_len = strstr(s, "\r\n") - s;
 
 	memcpy(val, s, val_len);
+  val[val_len] = 0;
 	return 1;
 }
 
@@ -47,12 +48,12 @@ static int get_head_int_val(char *head, const char *key, int *val)
 
 static int get_head_int64_val(const char *head, const char *key, int64_t *val)
 {
-	char tmp[32];
+	char tmp[256];
 
 	if (get_head_val(head, key, tmp) == 0) {
 		return 0;
 	}
-	
+
 	*val = _atoi64(tmp);
 	return 1;
 }
@@ -99,7 +100,7 @@ std::string Http::Header::find_header_value(const char *key)
 int64_t Http::Header::GetContentLength() {
   int64_t content_length = -1;
   if (get_head_int64_val(header_.c_str(), "Content-Length: ", &content_length)) {
-    tunolog("content_size: %" PRId64 , content_length);
+    //tunolog("content_size: %" PRId64 , content_length);
   }
   return content_length;
 };
@@ -230,7 +231,7 @@ int Http::InputStream::ReadChunkString(std::string &chunk_str)
     int chunk_size_str_length = 0;
     int chunk_size = parse_chunk_size(chunk_buf_, chunk_size_str_length);
     if (chunk_size == 0) {
-      //tunolog("size:%d", chunk_size);
+      //tunolog("chunk_size:%d", chunk_size);
       return TUNO_STATUS_DONE;
     } else if (chunk_size < 0) {
       return TUNO_STATUS_ERROR;
@@ -239,14 +240,14 @@ int Http::InputStream::ReadChunkString(std::string &chunk_str)
     //read chunk data
     if ((int)chunk_buf_.length() >= (chunk_size_str_length+2 + chunk_size+2)) {
       chunk_buf_.erase(0, chunk_size_str_length + 2);
-      //tunolog("size:%d", chunk_size);
+      //tunolog("chunk_size:%d", chunk_size);
       
       chunk_str = chunk_buf_.substr(0, chunk_size);
       //tunolog("data:%s", chunk_str.c_str());
       chunk_buf_.erase(0, chunk_size+2);
-      //if (chunk_buf_.length() > 0) {
+      if (chunk_buf_.length() > 0) {
         //tunolog("remain:%d '%s'", chunk_buf_.length(), chunk_buf_.c_str());
-      //}
+      }
     }
   }
 
@@ -281,6 +282,11 @@ void Http::OutputStream::WritePrintf(const char *fmt, ...) {
   va_start(ap, fmt);
   len = vsnprintf(buf, sizeof(buf) - 1, fmt, ap);
   buf[len] = 0;
+  if (strstr(buf, "\r\n")) {
+    printf("%s", buf);
+  } else {
+    printf("%s\n", buf);
+  }
   Write(buf, len);
   va_end(ap);
 };

@@ -70,6 +70,22 @@ public:
   void SetStatus(int new_status);
   void AppendStatus(int append_status);
 
+  void HeadDone() {
+    AppendStatus(STATUS_HEAD_DONE);
+  };
+
+  bool IsHeadDone() {
+    return (status_ & STATUS_HEAD_DONE) ? true : false;
+  };
+  
+  void BodyDone() {
+    AppendStatus(STATUS_BODY_DONE);
+  };
+
+  bool IsBodyDone() {
+    return (status_ & Http::Status::STATUS_BODY_DONE) ? true : false;
+  };
+
 private:
   int status_ = 0;
 };
@@ -117,6 +133,7 @@ public:
 
 private:
   struct tuno_socket *sk_ = nullptr;
+  bool write_header_done_ = false;
   std::shared_ptr<Header> header_;
   std::shared_ptr<Status> status_;
 };

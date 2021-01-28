@@ -162,7 +162,7 @@ static void tuno_ev_event(struct bufferevent *bev, short events, void *ptr)
 done:
   if (error || eof) {
     sk->flag |= TUNO_ERROR_ERROR; 
-  tunolog("tuno_ev_event err sk->flag:%d", sk->flag);
+    tunolog("tuno_ev_event err sk->flag:%d \"%s\"", sk->flag, evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
     sk->protocol->func->finish(sk, error);
     tuno_socket_free(sk);
   }

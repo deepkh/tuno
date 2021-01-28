@@ -13,128 +13,97 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
+#include <string>
+#include <algorithm>
 #include "http_client.h"
-#include "util/json_helper.h"
-
-/***************************************************
- * URL
-**************************************************/
-HttpClient::URL::URL() {
-};
-
-HttpClient::URL::~URL() {
-  ;
-};
-
-int HttpClient::URL::Init(Json::Value &json_obj) {
-  json_obj_ = json_obj;
-  host_ = json_obj_["host"].asString();
-  path_ = json_obj_["path"].asString();
-  ssl_ca_cert_file_ = json_obj_["ssl_ca_cert_file"].asString();
-  ssl_verify_hostname_ = json_obj_["ssl_verify_hostname"].asString();
-  file_for_upload_ = json_obj_["file_for_upload"].asString();
-  return 0;
-};
-
-std::string& HttpClient::URL::Host() {
-  return host_;
-};
-
-int HttpClient::URL::Port() {
-  return json_obj_["port"].asInt();
-};
-
-bool HttpClient::URL::IsSSL() {
-  return json_obj_["ssl"].asBool();
-};
-
-std::string &HttpClient::URL::Path() {
-  return path_;
-};
-
-int HttpClient::URL::Method() {
-  return json_obj_["method"].asInt(); //0 = GET, 1 = PUT
-};
-
-std::string &HttpClient::URL::FileForUpload()
-{
-  return file_for_upload_;
-};
-
-Json::Value &HttpClient::URL::JsonObj()
-{
-  return json_obj_;
-};
-
-bool HttpClient::URL::SSLDoCertVerify() {
-  return json_obj_["ssl_do_cert_verify"].asBool();
-};
-
-std::string &HttpClient::URL::SSLCaCertFile() {
-  return ssl_ca_cert_file_;
-};
-
-
-/***************************************************
-* URLFactory
-**************************************************/
-HttpClient::URLFactory::URLFactory() {
-  ;
-};
-
-HttpClient::URLFactory::~URLFactory() {
-  ;
-};
-
-int HttpClient::URLFactory::Init(std::string &json_str) 
-{
-  if (JsonParser::ParseFromString(json_str, json_obj_)) {
-    tunosetmsg2();
-    return -1;
-  }
-
-  if (!json_obj_.isArray()) {
-    tunolog("failed to parse json_str\n\"%s\"", json_str.c_str());
-    return -1;
-  }
-
-  index_ = 0;
-  return 0;
-};
-
-std::shared_ptr<Http::URL> HttpClient::URLFactory::NextURL() {
-  std::shared_ptr<HttpClient::URL> url;
-  for (;index_ < (int)json_obj_.size();) {
-    index_++;
-
-    if (!json_obj_[index_-1]["url"].isObject()) {
-      tunolog("failed to get url from json_str");
-      continue;
-    }
-    
-    url = std::shared_ptr<HttpClient::URL>(new HttpClient::URL());
-    if (url->Init(json_obj_[index_-1]["url"])) {
-      continue;
-    }
-
-    return url;
-  }
-  return url;
-};
-
 
 /************************************************
-* HttpClient::Connection
+* HttpClient::URL::Parse
 ***********************************************/
-HttpClient::Connection::Connection(struct tuno_socket *sk, std::shared_ptr<Http::URL> url, std::shared_ptr<Http::Handler> handler) {
-  context_ = std::shared_ptr<Http::Context>(new Http::Context(url));
-  context_->SetSocket(sk);
-  handler_ = handler;
-};
+HttpClient::URL HttpClient::URL::Parse(const std::string &uri, std::string ssl_cert_file_path, bool ssl_cert_verify) {
+  HttpClient::URL url;
+  url.ssl_cert_file_path_ = ssl_cert_file_path;
+  url.ssl_cert_verify_ = ssl_cert_verify;
 
-HttpClient::Connection::~Connection() {;};
+  std::string protocol = "http";
+  std::string port = "";
 
-int HttpClient::Connection::DoRead() {
+  typedef std::string::const_iterator iterator_t;
+
+  if (uri.length() == 0) {
+      return url;
+  }
+
+  iterator_t uriEnd = uri.end();
+
+  // get query start
+  iterator_t queryBegin = uri.begin();
+    iterator_t queryStart = std::find(queryBegin, uriEnd, '?');
+
+  // protocol
+  iterator_t protocolStart = uri.begin();
+  iterator_t protocolEnd = std::find(protocolStart, uriEnd, ':');            //"://");
+
+  if (protocolEnd != uriEnd) {
+    std::string prot = &*(protocolEnd);
+    if ((prot.length() > 3) && (prot.substr(0, 3) == "://")) {
+      protocol = std::string(protocolStart, protocolEnd);
+      protocolEnd += 3;   //      ://
+    } else {
+      protocolEnd = uri.begin();  // no protocol
+    }
+  } else {
+    protocolEnd = uri.begin();  // no protocol
+  }
+
+  // host
+  iterator_t hostStart = protocolEnd;
+  iterator_t pathStart = std::find(hostStart, uriEnd, '/');  // get pathStart
+
+  iterator_t hostEnd = std::find(protocolEnd, 
+    (pathStart != uriEnd) ? pathStart : queryStart, ':');  // check for port
+
+  url.host_ = std::string(hostStart, hostEnd);
+
+  // port
+  if ((hostEnd != uriEnd) && ((&*(hostEnd))[0] == ':')) {
+    hostEnd++;
+    iterator_t portEnd = (pathStart != uriEnd) ? pathStart : queryStart;
+    port = std::string(hostEnd, portEnd);
+  }
+
+  // path
+  if (pathStart != uriEnd) {
+    url.path_ = std::string(pathStart, queryStart);
+  }
+
+  // query
+  if (queryStart != uriEnd) {
+    url.path_ = url.path_ + std::string(queryStart, uri.end());
+  }
+
+  if (!port.empty()) {
+    url.port_ = atoi(port.c_str());
+  }
+
+  if (protocol.compare("http") == 0) {
+    if (url.port_ == 0) {
+      url.port_  = 80;
+    }
+  } else if (protocol.compare("https") == 0) {
+    if (url.port_ == 0) {
+      url.port_  = 443;
+    }
+    url.ssl_ = true;
+  }
+  return url;
+}
+
+/************************************************
+ * HttpClient::Reader
+ ***********************************************/
+int HttpClient::Reader::ReadHead()
+{
   char *buf = nullptr;
   char *tmp;
   int len;
@@ -147,11 +116,11 @@ int HttpClient::Connection::DoRead() {
   }
 
   //find header
-  if ((context_->Instream()->GetStatus()->GetStatus() & Http::Status::STATUS_HEAD_DONE) == 0) {
+  if (!IsHeadDone()) {
     if ((tmp = strstr((char *)buf, "\r\n\r\n"))) {
       //tunolog("found delemiter %d\n'%s'\n", len, buf);
       int head_size = tmp - buf + 2;
-      context_->Instream()->GetStatus()->AppendStatus(Http::Status::STATUS_HEAD_DONE);
+      HeadDone();
       context_->Instream()->GetHeader()->SetHeaderString(buf, head_size);
       tunolog("head_size: %d content_length:%lld \n\"%s\""
           , head_size
@@ -160,324 +129,206 @@ int HttpClient::Connection::DoRead() {
 
       /** remove header from buf */
       context_->Instream()->BufRemove(head_size + 2);
-      len = context_->Instream()->BufLen();
-      buf = context_->Instream()->Buf();
     }
   }
 
-  //process response body
-  if ((context_->Instream()->GetStatus()->GetStatus() & Http::Status::STATUS_HEAD_DONE) && len > 0) {
-    return handler_->DoResponse(context_);
-  }
+  //check content-length mode or chunk mode
+  if (IsHeadDone()) {
+    if (content_length_ == -2) {
+      content_length_ = context_->Instream()->GetHeader()->GetContentLength();
+      if (content_length_ == -1) {
+        if (!context_->Instream()->GetHeader()->IsChunkedEncoding()) {
+          tunosetmsg("unsupported transfer encoding");
+          return TUNO_STATUS_ERROR;
+        }
+        chunked_mode_ = true;
+      }
 
-  return TUNO_STATUS_NOT_DONE;
-};
-
-int HttpClient::Connection::DoWrite() {
-  int ret;
-
-  // init handler
-  if ((context_->Outstream()->GetStatus()->GetStatus() & Http::Status::STATUS_HEAD_DONE) == 0) {
-    if (handler_->Init(context_)) {
-      tunosetmsg2();
-      return TUNO_STATUS_ERROR;
+      if (chunked_mode_ == false && content_length_ == 0) {
+        BodyDone();
+      }
     }
+    tunolog("content_length_: %lld chunked_mode_:%d bodyDone:%d", content_length_, chunked_mode_, IsBodyDone());
   }
 
-  ret = handler_->DoRequest(context_);
-  if (ret == TUNO_STATUS_NOT_DONE) {
-    context_->Outstream()->AddWriteNotify();
+  return 0;
+}
+
+int HttpClient::Reader::ReadBody(std::string &buf)
+{
+  if (context_->Instream()->BufLen() == 0) {
+    return 0;
   }
-  return ret;
-};
 
-int HttpClient::Connection::Finish(int error) {
-  return handler_->Finish(context_, error);
-};
+  if (!chunked_mode_) {
+    //Content-Length mode
+    int len = context_->Instream()->BufLen();
+
+    buf.resize(len);
+    memcpy(&buf[0], context_->Instream()->Buf(), len);
+    
+    context_->Instream()->BufRemove(len);
+    read_length_ += len;
+
+    //tunolog("read %lld/%lld", read_length_, content_length_);      
+    if ((content_length_ >= 0 && read_length_ >= content_length_)) {
+      //tunolog("read done %lld/%lld", read_length_, content_length_);      
+      BodyDone();
+    }
+  } else {
+    //Chunked mode
+    buf.resize(0);
+    int ret = context_->Instream()->ReadChunkString(buf);
+
+    if (ret == TUNO_STATUS_DONE) {
+      tunolog("read chunked done");
+      BodyDone();
+      return 0;
+    } else if (ret == TUNO_STATUS_ERROR) {
+      return -1;
+    }
+
+    read_length_ += buf.size();
+  }
+  
+  return 0;
+}
 
 
-/************************************************
-* HttpClient::Parallel
-***********************************************/
-HttpClient::Parallel::Parallel() {
+/***************************************************
+ * HttpClient::Connection
+ **************************************************/
+HttpClient::Connection::Connection(struct event_base *ev_base
+    , std::shared_ptr<HttpClient::Handler> handler
+    , int timeout_sec, int timeout_usec) {
+  context_ = std::shared_ptr<HttpClient::Context>(
+      new HttpClient::Context(
+          std::shared_ptr<Http::Context>(new Http::Context())));
+  ev_base_ = ev_base;
+  handler_ = handler;
+
+  if (timeout_sec || timeout_usec) {
+    timeout_.tv_sec = timeout_sec;
+    timeout_.tv_usec = timeout_usec;
+  } else {
+    timeout_.tv_sec = 10;
+    timeout_.tv_usec = 0;
+  }
+  
   protocol_cb_.open = nullptr;
   protocol_cb_.close = nullptr;
   protocol_cb_.init = nullptr;
-  protocol_cb_.read = _read;
-  protocol_cb_.write = _write;
-  protocol_cb_.finish = _finish;
+  protocol_cb_.read = [](struct tuno_socket *sk) -> int {
+    HttpClient::Connection *connection = static_cast<HttpClient::Connection*>(sk->protocol->inst);
+    return connection->DoRead();
+  };
+  protocol_cb_.write = [](struct tuno_socket *sk) -> int {
+    HttpClient::Connection *connection = static_cast<HttpClient::Connection*>(sk->protocol->inst);
+    return connection->DoWrite();
+  };
+  protocol_cb_.finish = [](struct tuno_socket *sk, int error) -> int {
+    HttpClient::Connection *connection = static_cast<HttpClient::Connection*>(sk->protocol->inst);
+    return connection->DoFinish(error);
+  };
 
   protocol_.func = &protocol_cb_;
   protocol_.inst = static_cast<void*>(this);
   protocol_.lparam = nullptr;
   protocol_.rparam = nullptr;
-  
-  timeout_.tv_sec = 10;
-  timeout_.tv_usec = 0;
-};
-
-HttpClient::Parallel::~Parallel() {
-  ;
-};
-
-int HttpClient::Parallel::Init(struct event_base *ev_base, std::shared_ptr<Http::HandlerFactory> handler_factory
-    , int timeout_sec, int timeout_usec) 
-{
-  ev_base_ = ev_base;
-  handler_factory_ = handler_factory;
-  if (timeout_sec || timeout_usec) {
-    timeout_.tv_sec = timeout_sec;
-    timeout_.tv_usec = timeout_usec;
-  }
-  return 0;
-};
-
-int HttpClient::Parallel::Connect(std::shared_ptr<Http::URL> _url)
-{
-  std::shared_ptr<HttpClient::URL> url = std::dynamic_pointer_cast<HttpClient::URL>(_url);
-  std::shared_ptr<Http::Handler> handler = handler_factory_->FindHandler(url);
-  
-  if (handler.get() == nullptr) {
-    tunosetmsg2();
-    return -1;
-  }
-
-  struct tuno_socket *sk = nullptr;  
-  if ((sk = tuno_socket_connect(&protocol_, ev_base_, nullptr
-      , (char *)url->Host().c_str(), url->Port()
-      , url->IsSSL() ? TUNO_SOCKET_FLAG_SSL : 0
-      , &timeout_
-      , nullptr, nullptr
-      , url->SSLDoCertVerify() ? url->SSLCaCertFile().c_str() : nullptr
-      , url->SSLDoCertVerify() ? url->Host().c_str() : nullptr
-      )) == NULL) {
-    tunosetmsg2();
-    return -1;
-  }
-    
-  connection_map_[sk] = std::shared_ptr<Connection>(new Connection(sk, url, handler));
-  return 0;
-};
-
-int HttpClient::Parallel::Size() {
-  return (int) connection_map_.size();
-};
-
-// Cb function
-int HttpClient::Parallel::_do(int _case, struct tuno_socket *sk, int error)
-{
-  Parallel *p = static_cast<HttpClient::Parallel*>(sk->protocol->inst);
-  int ret = TUNO_STATUS_ERROR;
-  auto it = p->connection_map_.find(sk);
-  
-  if (it == p->connection_map_.end()) {
-    tunosetmsg("failed to to find sk %p", sk);
-    goto finally;
-  }
-
-  switch(_case) {
-    case 0:
-      ret = it->second->DoRead();
-      break;
-    case 1:
-      ret = it->second->DoWrite();
-      break;
-    case 2: 
-    {
-      ret = it->second->Finish(error);
-      p->connection_map_.erase(it);
-      break;
-    }
-    default:
-      break;
-    }
-
-finally:
-  return ret;
 }
 
-int HttpClient::Parallel::_read(struct tuno_socket *sk)
-{
-  return _do(0, sk);
-};
+std::shared_ptr<HttpClient::Connection> HttpClient::Connection::Connect(
+    struct event_base *ev_base, std::shared_ptr<HttpClient::Handler> handler, int timeout_sec, int timeout_usec) {
+  std::shared_ptr<HttpClient::Connection> connection(
+    new HttpClient::Connection(ev_base, handler, timeout_sec, timeout_usec)
+  );
 
-int HttpClient::Parallel::_write(struct tuno_socket *sk)
-{
-  return _do(1, sk);
-};
-
-int HttpClient::Parallel::_finish(struct tuno_socket *sk, int error)
-{
-  return _do(2, sk, error);
-};
-
-
-/***************************************************
- * HttpClient::DefaultGetHandler
- **************************************************/
-HttpClient::DefaultGetHandler::DefaultGetHandler(std::shared_ptr<Http::ReadContentHandler> read_content_handler) 
-{
-  read_content_handler_ = std::dynamic_pointer_cast<HttpClient::ReadContentHandler>(read_content_handler);
-};
-
-HttpClient::DefaultGetHandler::~DefaultGetHandler() 
-{
-  ;
-};
-
-int HttpClient::DefaultGetHandler::Init(std::shared_ptr<Http::Context> context)
-{
-  if (read_content_handler_.get() == nullptr) {
-    tunosetmsg("read_content_handler_.get() is null");
-    return -1;
-  }
-
-  if (read_content_handler_->Init(context)) {
+  if ((connection->sk_ = tuno_socket_connect(&connection->protocol_
+      , connection->ev_base_, nullptr
+      , (char *)connection->handler_->Url().Host().c_str()
+      , connection->handler_->Url().Port()
+      , connection->handler_->Url().SSL() ? TUNO_SOCKET_FLAG_SSL : 0
+      , &connection->timeout_
+      , nullptr, nullptr
+      , connection->handler_->Url().SSLCertVerify() ? connection->handler_->Url().SSLCertFilePah().c_str() : nullptr
+      , connection->handler_->Url().SSLCertVerify() ? connection->handler_->Url().Host().c_str() : nullptr
+      )) == NULL) {
     tunosetmsg2();
-    return -1;
-  }
-  return 0;
-};
-
-int HttpClient::DefaultGetHandler::DoRequest(std::shared_ptr<Http::Context> context) {
-  context->Outstream()->WritePrintf("GET %s HTTP/1.1\r\n", context->GetURL()->Path().c_str());
-  context->Outstream()->WritePrintf("Host: %s\r\n\r\n", context->GetURL()->Host().c_str());
-  return TUNO_STATUS_DONE;
-};
-
-int HttpClient::DefaultGetHandler::DoResponse(std::shared_ptr<Http::Context> context) 
-{
-  //check content-length mode or chunk mode
-  if (content_length_ == -2) {
-    content_length_ = context->Instream()->GetHeader()->GetContentLength();
-    if (content_length_ == -1) {
-      if (!context->Instream()->GetHeader()->IsChunkedEncoding()) {
-        tunosetmsg("unsupported transfer encoding");
-        return TUNO_STATUS_ERROR;
-      }
-      chunked_mode_ = true;
-    }
+    return std::shared_ptr<HttpClient::Connection>();
   }
 
-  if (!chunked_mode_) {
-    //Content-Length mode
-    char *buf = context->Instream()->Buf();
-    int len = context->Instream()->BufLen();
-    int ret = read_content_handler_->DoReadContentByLength(context, buf, len);
-    context->Instream()->BufRemove(len);
-    read_length_ += len;
-    if (ret) {
+  connection->context_->context()->SetSocket(connection->sk_);
+  return connection;
+}
+
+int HttpClient::Connection::DoRead() {
+  /** read head */
+  if (!context_->reader()->IsHeadDone()) {
+    if (context_->reader()->ReadHead()) {
       tunosetmsg2();
       return TUNO_STATUS_ERROR;
     }
+  }
 
-    if ((content_length_ >= 0 && read_length_ >= content_length_)) {
-      return TUNO_STATUS_DONE;
-    }
-  } else {
-    //Chunked mode
-    std::string chunk_str = "";
-    int ret = context->Instream()->ReadChunkString(chunk_str);
-
-    if (!chunk_str.empty()) {
-      if (read_content_handler_->DoReadContentByChunkString(context, chunk_str)) {
-        return TUNO_STATUS_ERROR;
-      }
-    }
-    return ret; 
+  if (!context_->reader()->IsHeadDone()) {
+    return TUNO_STATUS_NOT_DONE;
   }
   
+  if (context_->reader()->IsHeadDone()
+      && context_->reader()->IsBodyDone()) {
+    tunolog("read done 1");
+    return TUNO_STATUS_DONE;
+  }
+
+  /** read body */
+  std::string response;
+  
+  if (context_->reader()->ReadBody(response)) {
+    tunosetmsg2();
+    return TUNO_STATUS_ERROR;
+  }
+
+  if (response.size() > 0) {
+    if (handler_->Handlercb()(context_, response)) {
+      tunosetmsg2();
+      return TUNO_STATUS_ERROR;
+    }
+  }
+
+  if (!context_->reader()->IsBodyDone()) {
+    return TUNO_STATUS_NOT_DONE;
+  }
+
+  tunolog("read done 2");
+  return TUNO_STATUS_DONE;
+}
+
+int HttpClient::Connection::DoWrite() {
+  // write head
+  if (!context_->writer()->IsHeadDone()) {
+    context_->writer()->Outstream()->WritePrintf("%s %s HTTP/1.1\r\n"
+        , handler_->Method()
+        , handler_->Url().Path().c_str());
+    context_->writer()->Outstream()->WritePrintf("Host: %s\r\n", handler_->Url().Host().c_str());
+  }
+
+  // write head & body throw cb
+  std::string response;
+  if (handler_->Handlercb()(context_, response)) {
+    tunosetmsg2();
+    return TUNO_STATUS_ERROR;
+  }
+  
+  if (context_->writer()->IsHeadDone()
+      && context_->writer()->IsBodyDone()) {
+    tunolog("write done");
+    return TUNO_STATUS_DONE;
+  }
+
+  context_->writer()->Outstream()->AddWriteNotify();
   return TUNO_STATUS_NOT_DONE;
 }
 
-int HttpClient::DefaultGetHandler::Finish(std::shared_ptr<Http::Context> context, int error) 
-{
-  return read_content_handler_->Finish(context, error);
-}
-
-
-/***************************************************
- * HttpClient::DefaultPutHandler
- **************************************************/
-HttpClient::DefaultPutHandler::DefaultPutHandler(std::shared_ptr<Http::WriteContentHandler> write_content_handler) 
-{
-  write_content_handler_ = std::dynamic_pointer_cast<HttpClient::WriteContentHandler>(write_content_handler);
-};
-
-HttpClient::DefaultPutHandler::~DefaultPutHandler() 
-{
-  ;
-};
-
-int HttpClient::DefaultPutHandler::Init(std::shared_ptr<Http::Context> context)
-{
-  if (write_content_handler_.get() == nullptr) {
-    tunosetmsg("write_content_handler_.get() is null");
-    return -1;
-  }
-
-  if (write_content_handler_->Init(context)) {
-    tunosetmsg2();
-    return -1;
-  }
+int HttpClient::Connection::DoFinish(int error) {
   return 0;
-};
-
-
-int HttpClient::DefaultPutHandler::DoRequest(std::shared_ptr<Http::Context> context) {
-  if ((context->Outstream()->GetStatus()->GetStatus() & Http::Status::STATUS_HEAD_DONE) == 0) {
-    context->Outstream()->WritePrintf("PUT %s HTTP/1.1\r\n", context->GetURL()->Path().c_str());
-    context->Outstream()->WritePrintf("Host: %s\r\n", context->GetURL()->Host().c_str());
-    context->Outstream()->WritePrintf("Content-Disposition: attachment; filename=%s\r\n", write_content_handler_->FileName(context).c_str());
-    context->Outstream()->WritePrintf("Content-Type: %s\r\n", write_content_handler_->ContentType(context));
-    context->Outstream()->WritePrintf("Content-Length: %" PRId64 "\r\n\r\n", write_content_handler_->ContentLength(context));
-    context->Outstream()->GetStatus()->AppendStatus(Http::Status::STATUS_HEAD_DONE);
-  }
-  return write_content_handler_->DoWriteContent(context);
-};
-
-int HttpClient::DefaultPutHandler::DoResponse(std::shared_ptr<Http::Context> context) 
-{
-  return write_content_handler_->DoReadContent(context);
 }
-
-int HttpClient::DefaultPutHandler::Finish(std::shared_ptr<Http::Context> context, int error) 
-{
-  return write_content_handler_->Finish(context, error);
-}
-
-
-
-/************************************************
- * HttpClient::DefaultHandlerFactory
- ***********************************************/
-HttpClient::DefaultHandlerFactory::DefaultHandlerFactory(std::shared_ptr<Http::ContentHandlerFactory> content_handler_factory) 
-{
-  content_handler_factory_ = content_handler_factory;
-};
-
-HttpClient::DefaultHandlerFactory::~DefaultHandlerFactory() 
-{
-  ;
-};
-
-std::shared_ptr<Http::Handler> HttpClient::DefaultHandlerFactory::FindHandler(std::shared_ptr<Http::URL> url)
-{
-  std::shared_ptr<Http::Handler> handler;
-
-  switch(url->Method()) {
-  case 0:
-    handler = std::shared_ptr<Http::Handler>(
-        new HttpClient::DefaultGetHandler(
-          content_handler_factory_->FindReadContentHandler(url)));
-    break;
-  case 1:
-    handler = std::shared_ptr<Http::Handler>(
-        new HttpClient::DefaultPutHandler(
-          content_handler_factory_->FindWriteContentHandler(url)));
-    break;
-  }
-
-  return handler;
-}
-

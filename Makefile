@@ -22,8 +22,9 @@ test_file/10m.bin:
 	mkdir test_file 1> /dev/null 2> /dev/null
 	head -c 10M </dev/urandom > $@
 	md5sum $@ > $@.md5
+	cp $@ $@2
 
-http_server_test_file: test_file/10m.bin
+http_server_test_file: test_file/10m.bin 
 
 x509.key:
 	openssl req -nodes -new -x509 -keyout x509.key -days 365 -out x509.crt
