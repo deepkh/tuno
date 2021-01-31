@@ -208,6 +208,42 @@ int main(int argc, char* argv[]) {
   // Due to all working on async operation, so you could create so many HttpClient::Connection at same time
   // and the libtuno will processing the HttpClient::Connection in parallel
 
+  std::shared_ptr<HttpClient::Connection> download_index_htm;
+  if (test_case == -1 
+      || test_case == 0) {
+     download_index_htm = HttpClient::Connection::Connect(ev_base, 
+      HttpClient::Handler::New(
+        HttpClient::PUT, HttpClient::URL::Parse("https://127.0.0.1:1443/index.htm"
+                              , "/etc/ssl/certs/ca-certificates.crt"
+                              , false)
+        , [&](std::shared_ptr<HttpClient::Context> context, std::string &response) -> int {
+      
+          //request (could add custom request headers here)
+          if (!context->writer()->IsHeadDone()) {
+            context->writer()->Outstream()->WritePrintf("\r\n"); 
+            context->writer()->HeadDone();
+            context->writer()->BodyDone();
+          }
+
+          //response
+          if (response.size() == 0) {
+            return 0;
+          }
+
+          tunolog("%s", response.c_str());
+          return 0;
+        }
+      )
+    );
+
+    if (download_index_htm.get() == nullptr) {
+      tunosetmsg2();
+      tunolog("%s", tunogetmsg());
+      return -1;
+    }
+  }
+
+
   std::shared_ptr<HttpClient::Connection> download_by_content_length;
   if (test_case == -1 
       || test_case == 1) {

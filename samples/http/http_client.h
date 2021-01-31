@@ -234,6 +234,10 @@ public:
     ;
   };
 
+  static std::shared_ptr<Handler> New(int method, URL url, HandlerCb handler_cb) {
+    return std::shared_ptr<Handler>(new Handler(method, url, handler_cb));
+  };
+
   virtual const char *Method() {
      switch(method_) {
        case GET:
