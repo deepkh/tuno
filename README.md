@@ -5,20 +5,29 @@ Due to coding the client/server async/non-block socket program by use C/C++ is d
 
 ## Features
 
-* libtuno is written in C 
-* Provide C++ wrapper for http client and http server in the sample code
-* Client side SSL cert checking and hostname verify are supported
-* Based on [OpenSSL](https://www.openssl.org/) for SSL support  
-* Based on [libevent](https://libevent.org/) for async/non-block architecture design 
-* Use GNU/GCC (6.3.0 20170516) to build target for linux_x86-64 
-* Use GNU/Mingw-W64_x86-64 (6.3.0 20170516) to build target for windows_x86-64
+* Pure C for libtuno 
+* HTTP Client/Server C++ wrapper 
+* Async/non-block architectures design
+* SSL cert checking and hostname verification from client socket
+* Based on [OpenSSL](https://www.openssl.org/)  
+* Based on [libevent](https://libevent.org/)  
+* Using GNU/GCC (6.3.0 20170516) to build target for linux_x86-64 
+* Using GNU/Mingw-W64_x86-64 (6.3.0 20170516) to build target for windows_x86-64
 
 ## Samples 
 
-* HTTP Client
+* HTTP Client:
+	* [samples/http_client_main.cpp](samples/http_server_main.cpp)
+	* [samples/http/http_client.h](samples/http/http_server.h)
+	* [samples/http/http_server.cpp](samples/http/http_server.cpp)
 * HTTP Server
+	* [samples/http_server_main.cpp](samples/http_server_main.cpp)
+	* [samples/http/http_server.h](samples/http/http_server.h)
+	* [samples/http/http_server.cpp](samples/http/http_server.cpp)
 * TCP Reverse Proxy
+	*  [samples/tcp_proxy.cpp](samples/tcp_proxy.cpp)
 * RTSP Reverse Proxy 
+	* [samples/tcp_proxy.cpp](samples/rtsp_proxy.cpp)
 
 ## Clone
 
