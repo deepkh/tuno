@@ -17,9 +17,9 @@ Due to coding the client/server async/non-block socket program by use C/C++ is d
 ## Samples 
 
 * HTTP Client:
-	* [samples/http_client_main.cpp](samples/http_server_main.cpp)
-	* [samples/http/http_client.h](samples/http/http_server.h)
-	* [samples/http/http_server.cpp](samples/http/http_server.cpp)
+	* [samples/http_client_main.cpp](samples/http_client_main.cpp)
+	* [samples/http/http_client.h](samples/http/http_client.h)
+	* [samples/http/http_client.cpp](samples/http/http_client.cpp)
 * HTTP Server
 	* [samples/http_server_main.cpp](samples/http_server_main.cpp)
 	* [samples/http/http_server.h](samples/http/http_server.h)
