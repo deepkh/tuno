@@ -228,7 +228,7 @@ int main(int argc, char* argv[]) {
    * test commnad:
    *    ./runtime.linux/bin/http_client 1
    *    ./runtime.linux/bin/http_client 2
-   *    curl https://127.0.0.1:1443/index.htm -k
+   *    curl https://127.0.0.1:1443/index.htm -k -v
    **/ 
 
   std::shared_ptr<HttpServer::Router> router(new HttpServer::Router());
@@ -255,7 +255,7 @@ int main(int argc, char* argv[]) {
       //write body
       if (!context->writer()->IsBodyDone()) {
         context->writer()->Outstream()->WritePrintf("HELLO WORLD!\n");
-        context->writer()->HeadDone();
+        context->writer()->BodyDone();
       }
 
       return 0;
