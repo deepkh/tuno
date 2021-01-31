@@ -27,10 +27,6 @@ public:
       save_path_ = std::string(save_path);
   };
 
-  virtual ~DownloadHandler() {
-    ;
-  };
-
   static std::shared_ptr<DownloadHandler> New(HttpClient::URL url, const char *save_path) {
     return std::shared_ptr<DownloadHandler>(new DownloadHandler(url, save_path));
   };
@@ -112,10 +108,6 @@ public:
       tunolog("%s %s", upload_file_.c_str(), file_name_.c_str());
   };
 
-  virtual ~UploadHandler() {
-    ;
-  };
-
   static std::shared_ptr<UploadHandler> New(HttpClient::URL url, const char *upload_file) {
     return std::shared_ptr<UploadHandler>(new UploadHandler(url, upload_file));
   };
@@ -185,6 +177,21 @@ private:
 };
 
 
+int add_connection(std::vector<std::shared_ptr<HttpClient::Connection>> &connection_vec
+    , struct event_base *ev_base
+    , std::shared_ptr<HttpClient::Handler> handler)
+{
+  auto c = HttpClient::Connection::Connect(ev_base, handler);
+
+  if (c.get() == nullptr) {
+    tunosetmsg2();
+    tunolog("%s", tunogetmsg());
+    return -1;
+  }
+
+  connection_vec.push_back(c);
+  return 0;
+}
 
 int main(int argc, char* argv[]) {
   struct event_base *ev_base = NULL;
@@ -207,103 +214,71 @@ int main(int argc, char* argv[]) {
   // These demo show how to use the async http client with SSL support and cert checking.
   // Due to all working on async operation, so you could create so many HttpClient::Connection at same time
   // and the libtuno will processing the HttpClient::Connection in parallel
+  std::vector<std::shared_ptr<HttpClient::Connection>> connection_vec;
 
-  std::shared_ptr<HttpClient::Connection> download_index_htm;
-  if (test_case == -1 
-      || test_case == 0) {
-     download_index_htm = HttpClient::Connection::Connect(ev_base, 
-      HttpClient::Handler::New(
-        HttpClient::PUT, HttpClient::URL::Parse("https://127.0.0.1:1443/index.htm"
-                              , "x509.crt"
-                              , true)
-        , [&](std::shared_ptr<HttpClient::Context> context, std::string &response) -> int {
-      
-          //request (could add custom request headers here)
-          if (!context->writer()->IsHeadDone()) {
-            context->writer()->Outstream()->WritePrintf("\r\n"); 
-            context->writer()->HeadDone();
-            context->writer()->BodyDone();
-          }
+  //test by custom defined inner lambda function
+  if (test_case == -1 || test_case == 0) {
+    auto handler = HttpClient::Handler::New(
+      HttpClient::PUT, HttpClient::URL::Parse("https://127.0.0.1:1443/index.htm"
+                            , "x509.crt"
+                            , true)
+      , [&](std::shared_ptr<HttpClient::Context> context, std::string &response) -> int {
+    
+        //request (could add custom request headers here)
+        if (!context->writer()->IsHeadDone()) {
+          context->writer()->Outstream()->WritePrintf("\r\n"); 
+          context->writer()->HeadDone();
+          context->writer()->BodyDone();
+        }
 
-          //response
-          if (response.size() == 0) {
-            return 0;
-          }
-
-          tunolog("%s", response.c_str());
+        //response
+        if (response.size() == 0) {
           return 0;
         }
-      )
+
+        tunolog("%s", response.c_str());
+        return 0;
+      }
     );
 
-    if (download_index_htm.get() == nullptr) {
-      tunosetmsg2();
-      tunolog("%s", tunogetmsg());
+    if (add_connection(connection_vec, ev_base, handler)) {
       return -1;
     }
   }
 
-
-  std::shared_ptr<HttpClient::Connection> download_by_content_length;
-  if (test_case == -1 
-      || test_case == 1) {
-     download_by_content_length = HttpClient::Connection::Connect(ev_base, 
-      DownloadHandler::New(
-        HttpClient::URL::Parse("https://127.0.0.1:1443/dwload/test_file/10m.bin"
-                              , "x509.crt"
-                              , true)
-        , "download"
-      )
-    );
-
-    if (download_by_content_length.get() == nullptr) {
-      tunosetmsg2();
-      tunolog("%s", tunogetmsg());
-      return -1;
+  //test downlaod by using content-length mode 
+  if (test_case == -1|| test_case == 1) {
+    for (int i=0; i<3; i++) {
+      std::string file = "https://127.0.0.1:1443/dwload/test_file/20M_"+std::to_string(i+1);
+      auto handler = DownloadHandler::New(
+           HttpClient::URL::Parse(file.c_str()
+                                , "x509.crt"
+                                , true)
+           , "download");
+      if (add_connection(connection_vec, ev_base, handler)) {
+        return -1;
+      }
     }
   }
 
-  std::shared_ptr<HttpClient::Connection> upload_by_content_length;
-  if (test_case == -1 
-      || test_case == 2) {
-    upload_by_content_length = HttpClient::Connection::Connect(ev_base, 
-      UploadHandler::New(
+  //test upload by using content-length mode
+  if (test_case == -1|| test_case == 2) {
+    for (int i=0; i<3; i++) {
+      std::string file = "test_file/20M_"+std::to_string(i+1);
+      auto handler = UploadHandler::New(
         HttpClient::URL::Parse("https://127.0.0.1:1443/upload"
                               , "x509.crt"
                               , true)
-        , "test_file/10m.bin"
-      )
-    );
-
-    if (upload_by_content_length.get() == nullptr) {
-      tunosetmsg2();
-      tunolog("%s", tunogetmsg());
-      return -1;
-    }
-  }
-  
-  std::shared_ptr<HttpClient::Connection> download_by_content_length_2;
-  if (test_case == -1 
-      || test_case == 3) {
-    download_by_content_length_2 = HttpClient::Connection::Connect(ev_base, 
-      DownloadHandler::New(
-        HttpClient::URL::Parse("https://127.0.0.1:1443/dwload/test_file/10m.bin2"
-                              , "x509.crt"
-                              , true)
-        , "download"
-      )
-    );
-
-    if (download_by_content_length_2.get() == nullptr) {
-      tunosetmsg2();
-      tunolog("%s", tunogetmsg());
-      return -1;
+        , file.c_str());
+      if (add_connection(connection_vec, ev_base, handler)) {
+        return -1;
+      }
     }
   }
 
+  //test downlaod by using chunked mode
   std::shared_ptr<HttpClient::Connection> download_by_chunked_str;
-  if (test_case == -1 
-      || test_case == 4) {
+  if (test_case == -1 || test_case == 3) {
     download_by_chunked_str = HttpClient::Connection::Connect(ev_base, 
       DownloadHandler::New(HttpClient::URL::Parse(
                             "https://www.nginx.com/"

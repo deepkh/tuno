@@ -18,13 +18,14 @@ SHELL=/bin/sh
 
 include $(TUNO)/${MAKEFILE_DEP}
 
-test_file/10m.bin:
+test_file/20M:
 	mkdir test_file 1> /dev/null 2> /dev/null
-	head -c 10M </dev/urandom > $@
-	md5sum $@ > $@.md5
-	cp $@ $@2
+	head -c 20000000 </dev/urandom > $@_1
+	md5sum $@_1 > $@_1.md5
+	cp $@_1 $@_2
+	cp $@_1 $@_3
 
-http_server_test_file: test_file/10m.bin 
+http_server_test_file: test_file/20M 
 
 x509.key:
 	openssl req -nodes -new -x509 -keyout x509.key -days 365 -out x509.crt
@@ -32,7 +33,7 @@ x509.key:
 http_server_x509_self_signed: x509.key
 
 http_server_curl_dwload_test:
-	curl -k -v -O https://127.0.0.1:1443/dwload/test_file/10m.bin
+	curl -k -v -O https://127.0.0.1:1443/dwload/test_file/20M_1
 	md5sum download/10m.bin
 
 http_server_curl_upload_test:

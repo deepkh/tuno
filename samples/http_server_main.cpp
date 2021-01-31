@@ -28,10 +28,6 @@ public:
       tunolog("DownloadHandler '%s' '%s'", path, root_path);
   };
 
-  virtual ~DownloadHandler() {
-    ;
-  };
-
   HttpServer::HandlerCb GetHandlerCb() {
     return [this](std::shared_ptr<HttpServer::Context> context
                 , std::string &response) -> int {
@@ -123,10 +119,6 @@ public:
   UploadHandler(int method, const char *path, const char *root_path)
     :HttpServer::Handler(method, path, nullptr) {
       root_path_ = std::string(root_path);
-  };
-
-  virtual ~UploadHandler() {
-    ;
   };
 
   static std::shared_ptr<UploadHandler> New(int method, const char *path, const char *root_path) {
