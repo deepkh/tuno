@@ -166,7 +166,8 @@ void Http::Status::AppendStatus(int append_status)
 /************************************************
  * Http::InputStream
  ***********************************************/
-Http::InputStream::InputStream() {
+Http::InputStream::InputStream(struct tuno_socket *sk) {
+  sk_ = sk;
   header_ = std::shared_ptr<Http::Header>(new Http::Header());
   status_ = std::shared_ptr<Http::Status>(new Http::Status());
 };
@@ -258,7 +259,8 @@ int Http::InputStream::ReadChunkString(std::string &chunk_str)
 /************************************************
  * Http::OutputStream
  ***********************************************/
-Http::OutputStream::OutputStream() {
+Http::OutputStream::OutputStream(struct tuno_socket *sk) {
+  sk_ = sk;
   header_ = std::shared_ptr<Http::Header>(new Http::Header());
   status_ = std::shared_ptr<Http::Status>(new Http::Status());
 };
@@ -307,27 +309,14 @@ std::shared_ptr<Http::Header> Http::OutputStream::GetHeader() {
 /************************************************
  * Http::Context
  ***********************************************/
-Http::Context::Context(std::shared_ptr<URL> url) {
-  url_ = url;
-  input_stream_ = std::shared_ptr<Http::InputStream>(new Http::InputStream());
-  output_stream_ = std::shared_ptr<Http::OutputStream>(new Http::OutputStream());
-};
-
-Http::Context::Context() {
-  input_stream_ = std::shared_ptr<Http::InputStream>(new Http::InputStream());
-  output_stream_ = std::shared_ptr<Http::OutputStream>(new Http::OutputStream());
+Http::Context::Context(struct tuno_socket *sk) {
+  sk_ = sk;
+  input_stream_ = std::shared_ptr<Http::InputStream>(new Http::InputStream(sk_));
+  output_stream_ = std::shared_ptr<Http::OutputStream>(new Http::OutputStream(sk_));
 };
 
 Http::Context::~Context() {
   ;
-};
-
-void Http::Context::SetURL(std::shared_ptr<URL> url) {
-  url_ = url;
-};
-
-std::shared_ptr<Http::URL> Http::Context::GetURL() {
-  return url_;
 };
 
 void Http::Context::SetSocket(struct tuno_socket *sk) {

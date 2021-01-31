@@ -445,6 +445,7 @@ int tuno_socket_input_length(struct tuno_socket *sk)
 static void do_tuno_socket_notify_cb(evutil_socket_t sock, short which, void *arg)
 {
   struct tuno_socket_write_notify *p = (struct tuno_socket_write_notify *) arg;
+  TAILQ_REMOVE(&p->sk->notify_list, p, next);
   if (p->type == TUNO_SOCKET_NOTIFY_WRITE) {
     tuno_ev_write(NULL, p->sk);
   } else if (p->type == TUNO_SOCKET_NOTIFY_CUSTOM) {
@@ -452,7 +453,6 @@ static void do_tuno_socket_notify_cb(evutil_socket_t sock, short which, void *ar
   } else if (p->type == TUNO_SOCKET_NOTIFY_READ) {
     tuno_ev_read(NULL, p->sk);
   }
-  TAILQ_REMOVE(&p->sk->notify_list, p, next);
   tuno_socket_del_notify(p);
 }
 

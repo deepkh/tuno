@@ -95,7 +95,7 @@ private:
  ***********************************************/
 class InputStream {
 public:
-  InputStream();
+  InputStream(struct tuno_socket *sk = nullptr);
   ~InputStream();
   void SetSocket(struct tuno_socket *sk);
   
@@ -120,7 +120,7 @@ private:
  ***********************************************/
 class OutputStream {
 public:
-  OutputStream();
+  OutputStream(struct tuno_socket *sk = nullptr);
   ~OutputStream();
   void SetSocket(struct tuno_socket *sk);
   
@@ -139,27 +139,12 @@ private:
 };
 
 /************************************************
- * Http::URL
- ***********************************************/
-class URL {
-public:
-  virtual std::string &Host() = 0;
-  virtual int Port() = 0;
-  virtual bool IsSSL() = 0;
-  virtual std::string &Path() = 0;
-  virtual int Method() = 0;      //0 = GET, 1 = PUT
-};
-
-/************************************************
  * Http::Context
  ***********************************************/
 class Context {
 public:
-  Context(std::shared_ptr<URL> url);
-  Context();
+  Context(struct tuno_socket *sk = nullptr);
   ~Context();
-  void SetURL(std::shared_ptr<URL> url);
-  std::shared_ptr<URL> GetURL();
   void SetSocket(struct tuno_socket *sk);
   std::shared_ptr<InputStream> Instream();
   std::shared_ptr<OutputStream> Outstream();
@@ -171,58 +156,8 @@ public:
 
 private:
   struct tuno_socket *sk_ = nullptr;
-  std::shared_ptr<URL> url_;
   std::shared_ptr<InputStream> input_stream_;
   std::shared_ptr<OutputStream> output_stream_;
-};
-
-/***************************************************
- * ReadContentHandler
- **************************************************/
-class ReadContentHandler {
-public:
-  virtual int Init(std::shared_ptr<Context> context) = 0;
-  virtual int DoReadContentByLength(std::shared_ptr<Http::Context> context, char *buf, int size) = 0;
-  virtual int DoReadContentByChunkString(std::shared_ptr<Http::Context> context, std::string &chunk_str) = 0;
-  virtual int Finish(std::shared_ptr<Http::Context> context, int error) = 0;
-};
-
-/***************************************************
- * WriteContentHandler
- **************************************************/
-class WriteContentHandler {
-public:
-  virtual int Init(std::shared_ptr<Context> context) = 0;
-  virtual int DoWriteContent(std::shared_ptr<Http::Context> context) = 0;
-  virtual int Finish(std::shared_ptr<Http::Context> context, int error) = 0;
-};
-
-/***************************************************
- * ContentHandlerFactory
- **************************************************/
-class ContentHandlerFactory {
-public:
-  virtual std::shared_ptr<ReadContentHandler> FindReadContentHandler(std::shared_ptr<Http::URL> url) = 0;
-  virtual std::shared_ptr<WriteContentHandler> FindWriteContentHandler(std::shared_ptr<Http::URL> url) = 0;
-};
-
-/************************************************
- * Http::Handler
- ***********************************************/
-class Handler {
-public:
-  virtual int Init(std::shared_ptr<Context> context) = 0;
-  virtual int DoRequest(std::shared_ptr<Context> context) = 0;
-  virtual int DoResponse(std::shared_ptr<Context> context) = 0;
-  virtual int Finish(std::shared_ptr<Http::Context> context, int error) = 0;
-};
-
-/************************************************
- * Http::HandlerFactory
- ***********************************************/
-class HandlerFactory {
-public:
-  virtual std::shared_ptr<Handler> FindHandler(std::shared_ptr<Http::URL> url) = 0;
 };
 
 };

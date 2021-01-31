@@ -214,7 +214,7 @@ private:
 /************************************************
  * HttpClient::Handler
  ***********************************************/
-typedef std::function<int(std::shared_ptr<HttpClient::Context> context, std::string &response/*, void **arg*/)> HandlerCb;
+typedef std::function<int(std::shared_ptr<HttpClient::Context> context, std::string &response)> HandlerCb;
 enum {
   GET = 0,
   POST,

@@ -204,8 +204,8 @@ int main(int argc, char* argv[]) {
     test_case = atoi(argv[1]);
   }
 
-  // These demo show how to use the async http client with SSL supported and cert checking.
-  // Due to all working on async operation, so you could create so many HttpClient::Connection
+  // These demo show how to use the async http client with SSL support and cert checking.
+  // Due to all working on async operation, so you could create so many HttpClient::Connection at same time
   // and the libtuno will processing the HttpClient::Connection in parallel
 
   std::shared_ptr<HttpClient::Connection> download_by_content_length;

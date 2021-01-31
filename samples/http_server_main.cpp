@@ -17,302 +17,280 @@
 #include "util/json_helper.h"
 #include "util/file_stream.h"
 
-/***************************************************
- * CustomFileDownloadContentHandler
- **************************************************/
-class CustomFileDownloadContentHandler: public HttpServer::WriteContentHandler {
+/************************************************
+ * DownloadHandler 
+ ***********************************************/
+class DownloadHandler: public HttpServer::Handler {
 public:
-  CustomFileDownloadContentHandler(std::string path_prefix, Json::Value &server_config) {
-    path_prefix_ = path_prefix;
-    server_config_ = server_config;
+  DownloadHandler(int method, const char *path, const char *root_path)
+    :HttpServer::Handler(method, path, nullptr) {
+      root_path_ = std::string(root_path);
+      tunolog("DownloadHandler '%s' '%s'", path, root_path);
   };
-  ~CustomFileDownloadContentHandler() {
+
+  virtual ~DownloadHandler() {
     ;
   };
 
-  virtual int Init(std::shared_ptr<Http::Context> context) override {
-    std::string path = context->GetURL()->Path();
-    path = path.substr(path_prefix_.length(), path.length() - path_prefix_.length());
-    file_name_ = path;
-    path = server_config_["http_server"]["file_download_path"].asString() + path;
+  HttpServer::HandlerCb GetHandlerCb() {
+    return [this](std::shared_ptr<HttpServer::Context> context
+                , std::string &response) -> int {
+      // Due to async operation, so this handler callback will call multi times when reader/writer is ready to read/write. 
 
-    if (frs_.get() != nullptr) {
-      frs_ = std::shared_ptr<fs::FileReadStream>();
-    }
+      // open file for upload
+      if (frs_.get() == nullptr) {
+        std::string file_path = context->url()->Path();
+        file_name_ = file_path.substr(this->path_.length(), file_path.length() - this->path_.length());
 
-    frs_ = std::shared_ptr<fs::FileReadStream>(new fs::FileReadStream());
-    if (frs_->Open(path)) {
-      tunosetmsg("failed to open %s", path.c_str());
-      return -1;
-    }
-    
-    //tunolog("file:%s size: %" PRId64 "", path.c_str(), frs_->Length());
-    return 0;
-  };
+        file_path = this->root_path_ + file_name_;
+        tunolog("file_path:'%s' file:'%s'", file_path.c_str(), file_name_.c_str());
 
-  virtual int StatusCode(std::shared_ptr<Http::Context> context) override {
-    return frs_->IsOpen() ? 200 : 404;
-  }
+        frs_ = std::shared_ptr<fs::FileReadStream>(new fs::FileReadStream());
+        if (frs_->Open(file_path)) {
+          tunosetmsg("failed to open %s", file_path.c_str());
+          return -1;
+        }
 
-  virtual int64_t ContentLength(std::shared_ptr<Http::Context> context) override {
-    return frs_->Length();
-  };
-
-  virtual const char *ContentType(std::shared_ptr<Http::Context> context) override {
-    return "application/octet-stream";
-  };
-
-  virtual int DoWriteContent(std::shared_ptr<Http::Context> context) override {
-
-    if (!frs_->IsOpen()) {
-      return TUNO_STATUS_DONE;
-    }
-
-    size_t r = frs_->Read(buf_, sizeof(buf_));
-    if (r == 0) {
-      tunolog("writing (EOF) %" PRId64 "/%" PRId64 , frs_->ReadSize(), frs_->Length());
-      return TUNO_STATUS_DONE;
-    }
-
-    context->Outstream()->Write(buf_, (int)r);
-    tunolog("writing %s %" PRId64 "/%" PRId64 , file_name_.c_str(), frs_->ReadSize(), frs_->Length());
-
-    if (frs_->Length() > 0) {
-      if (frs_->ReadSize() >= frs_->Length()) {
-        tunolog("writing DONE %s %" PRId64 "/%" PRId64 , file_name_.c_str(), frs_->ReadSize(), frs_->Length());
-        return TUNO_STATUS_DONE;
+        buf_.resize(4096);
       }
-    }
+   
+      //write head
+      if (!context->writer()->IsHeadDone()) {
+        context->writer()->Outstream()->WritePrintf("HTTP/1.1 %d OK\r\n", 200);
+        context->writer()->Outstream()->WritePrintf("Content-Type: %s\r\n", "application/octet-stream");
+        context->writer()->Outstream()->WritePrintf("Content-Length: %lld\r\n\r\n", frs_->Length());
+        context->writer()->HeadDone();
+      }
 
-    return TUNO_STATUS_NOT_DONE;
+      //write body
+      size_t r = frs_->Read(&buf_[0], buf_.size());
+      if (r == 0) {
+        tunolog("writing (EOF) %lld/%lld" , frs_->ReadSize(), frs_->Length());
+        context->writer()->BodyDone();
+        return 0;
+      }
+
+      context->writer()->Outstream()->Write(&buf_[0], (int)r);
+      tunolog("writing %s %lld/%lld" , file_name_.c_str(), frs_->ReadSize(), frs_->Length());
+
+      if (frs_->ReadSize() >= frs_->Length()) {
+        tunolog("writing DONE %s %lld/%lld" , file_name_.c_str(), frs_->ReadSize(), frs_->Length());
+        context->writer()->BodyDone();
+        return 0;
+      }
+      
+      return 0;
+    };
   };
-
-  virtual int Finish(std::shared_ptr<Http::Context> context, int error) override {
-    if (frs_.get() != nullptr) {
-      frs_ = std::shared_ptr<fs::FileReadStream>();
-    }
-    return 0;
-  };
-
 private:
-  std::string path_prefix_;
-  Json::Value server_config_;
+  std::string root_path_;
   std::shared_ptr<fs::FileReadStream> frs_;
   std::string file_name_;
-  char buf_[4096];
+  std::string buf_;
 };
 
-
-/***************************************************
- * CustomFileUploadContentHandler
- **************************************************/
-class CustomFileUploadContentHandler: public HttpServer::ReadContentHandler {
+/************************************************
+ * DownloadHandlerFactory
+ ***********************************************/
+class DownloadHandlerFactory: public HttpServer::HandlerFactory {
 public:
-  CustomFileUploadContentHandler(std::string path_prefix, Json::Value &server_config) {
-    server_config_ = server_config;
-  };
-  ~CustomFileUploadContentHandler() {
-    ;
+  DownloadHandlerFactory(int method, const char *path, const char *root_path)
+  :HttpServer::HandlerFactory(method, path) {
+    root_path_ = root_path;
   };
 
-  virtual int Init(std::shared_ptr<Http::Context> context) override {
-    if (fws_.get() != nullptr) {
-      fws_ = std::shared_ptr<fs::FileWriteStream>();
-    }
-
-    std::string file_name = context->Instream()->GetHeader()->GetAttachmentFilename();
-    if (file_name.empty()) {
-      tunosetmsg("failed to get header of \"Content-Disposition: attachment; filename=\"");
-      return -1;
-    }
-    file_name_ = file_name;
-
-    std::string path = server_config_["http_server"]["file_upload_path"].asString();
-    fs::mkdir(path.c_str());
-    path += "/";
-    path += file_name;
-
-    fws_ = std::shared_ptr<fs::FileWriteStream>(new fs::FileWriteStream());
-    if (fws_->Open(path)) {
-      tunosetmsg("failed to open %s", path.c_str());
-      return -1;
-    }
-
-    return 0;
+  static std::shared_ptr<DownloadHandlerFactory> New(int method, const char *path, const char *root_path) {
+    return std::shared_ptr<DownloadHandlerFactory>(
+      new DownloadHandlerFactory(method, path, root_path));
   };
 
-  virtual int StatusCode(std::shared_ptr<Http::Context> context) override {
-    return fws_->IsOpen() ? 200 : 501;
-  };
-
-  virtual int64_t ContentLength(std::shared_ptr<Http::Context> context) override {
-    return 0;
-  };
-
-  virtual const char *ContentType(std::shared_ptr<Http::Context> context) override {
-    return "text/html";
-  };
-
-  virtual int DoReadContentByLength(std::shared_ptr<Http::Context> context, char *buf, int size) override {
-    if (content_length_ == -2) {
-      content_length_ = context->Instream()->GetHeader()->GetContentLength();
-    }
-   
-    fws_->Write(buf, size);
-    //tunolog("\"%s\"", buf);
-  
-    tunolog("loading %s %" PRId64 "/%" PRId64 , file_name_.c_str(), fws_->WriteSize(), content_length_);
-    if ((content_length_ >= 0 && fws_->WriteSize() >= content_length_)) {
-      tunolog("loading DONE %s %" PRId64 "/%" PRId64 
-          , file_name_.c_str(), fws_->WriteSize(), content_length_);
-    }
-    return 0;
-  };
-
-  virtual int DoReadContentByChunkString(std::shared_ptr<Http::Context> context, std::string &chunk_str) override {
-    fws_->Write((char *)chunk_str.c_str(), chunk_str.size());
-    tunolog("loading (chunk) %s %" PRId64 "", file_name_.c_str(), fws_->WriteSize());
-    return 0;
-  };
-
-  virtual int DoWriteContent(std::shared_ptr<Http::Context> context) override {
-    return TUNO_STATUS_DONE;
-  };
-
-  virtual int Finish(std::shared_ptr<Http::Context> context, int error) override {
-    if (fws_.get() != nullptr) {
-      fws_ = std::shared_ptr<fs::FileWriteStream>();
-    }
-    return 0;
+  virtual std::shared_ptr<HttpServer::Handler> NewHandler() { 
+    return std::shared_ptr<HttpServer::Handler>(
+        new DownloadHandler(method_, path_.c_str(), root_path_.c_str()));
   };
 
 private:
-  Json::Value server_config_;
+  int method_ = 0;
+  std::string root_path_;
+};
+
+
+/************************************************
+ * UploadHandler 
+ ***********************************************/
+class UploadHandler: public HttpServer::Handler {
+public:
+  UploadHandler(int method, const char *path, const char *root_path)
+    :HttpServer::Handler(method, path, nullptr) {
+      root_path_ = std::string(root_path);
+  };
+
+  virtual ~UploadHandler() {
+    ;
+  };
+
+  static std::shared_ptr<UploadHandler> New(int method, const char *path, const char *root_path) {
+    return std::shared_ptr<UploadHandler>(new UploadHandler(method, path, root_path));
+  };
+
+  HttpServer::HandlerCb GetHandlerCb() {
+    return [this](std::shared_ptr<HttpServer::Context> context
+                , std::string &response) -> int {
+      // Due to async operation, so this handler callback will call multi times when reader/writer is ready to read/write. 
+
+      // open file for write
+      if (fws_.get() == nullptr) {
+        std::string file_name = context->reader()->GetHeader()->GetAttachmentFilename();
+        if (file_name.empty()) {
+          tunosetmsg("failed to get header of \"Content-Disposition: attachment; filename=\"");
+          return -1;
+        }
+        file_name_ = file_name;
+
+        fs::mkdir(root_path_.c_str());
+        std::string file_path = root_path_ + "/" + file_name_;
+        
+        tunolog("file_path:'%s' file:'%s'", file_path.c_str(), file_name_.c_str());
+
+        fws_ = std::shared_ptr<fs::FileWriteStream>(new fs::FileWriteStream());
+        if (fws_->Open(file_path)) {
+          tunosetmsg("failed to open %s", file_path.c_str());
+          return -1;
+        }
+      }
+
+      if (response.size() > 0) {
+        fws_->Write(&response[0], response.size());
+      }
+
+      if (count_++%100 == 0) {
+        tunolog("upload %s %lld/%lld %d" , file_name_.c_str(), fws_->WriteSize(), context->reader()->ContentLength(), count_);
+      }
+ 
+      if (fws_->WriteSize() >= context->reader()->ContentLength()) {
+        tunolog("upload DONE %s %lld/%lld" , file_name_.c_str(), fws_->WriteSize(), context->reader()->ContentLength());
+        context->writer()->Outstream()->WritePrintf("HTTP/1.1 %d OK\r\n", 200);
+        context->writer()->Outstream()->WritePrintf("Content-Length: 0\r\n\r\n"); 
+        context->writer()->HeadDone();
+        context->writer()->BodyDone();
+      }
+
+      return 0;
+    };
+  };
+private:
+  int count_ = 0;
+  std::string root_path_;
   std::shared_ptr<fs::FileWriteStream> fws_;
-  int64_t content_length_ = -2;
   std::string file_name_;
+  std::string buf_;
 };
 
-
-
-/***************************************************
- * CustomContentHandlerFactory
- **************************************************/
-class CustomContentHandlerFactory: public Http::ContentHandlerFactory {
+/************************************************
+ * UploadHandlerFactory
+ ***********************************************/
+class UploadHandlerFactory: public HttpServer::HandlerFactory {
 public:
-  CustomContentHandlerFactory(Json::Value &server_config) {
-    server_config_ = server_config;
-  };
-  ~CustomContentHandlerFactory() {
-    ;
-  };
-  virtual std::shared_ptr<Http::ReadContentHandler> FindReadContentHandler(std::shared_ptr<Http::URL> url) override  {
-    std::shared_ptr<Http::ReadContentHandler> read_content_handle;
-    if (url->Path().compare("/upload") == 0) {
-      read_content_handle = std::shared_ptr<Http::ReadContentHandler>(
-          new CustomFileUploadContentHandler("/upload", server_config_));
-    }
-    return read_content_handle;
+  UploadHandlerFactory(int method, const char *path, const char *root_path)
+  :HttpServer::HandlerFactory(method, path) {
+    root_path_ = root_path;
   };
 
-  virtual std::shared_ptr<Http::WriteContentHandler> FindWriteContentHandler(std::shared_ptr<Http::URL> url) override {
-    std::shared_ptr<Http::WriteContentHandler> write_content_handle;
-    if (url->Path().compare(0, 7, "/dwload") == 0) {
-      write_content_handle = std::shared_ptr<Http::WriteContentHandler>(
-          new CustomFileDownloadContentHandler("/dwload", server_config_)
-      );
-    }
-    return write_content_handle;
+  static std::shared_ptr<UploadHandlerFactory> New(int method, const char *path, const char *root_path) {
+    return std::shared_ptr<UploadHandlerFactory>(
+      new UploadHandlerFactory(method, path, root_path));
   };
+
+  virtual std::shared_ptr<HttpServer::Handler> NewHandler() { 
+    return std::shared_ptr<HttpServer::Handler>(
+        new UploadHandler(method_, path_.c_str(), root_path_.c_str()));
+  };
+
 private:
-  Json::Value server_config_;
+  int method_ = 0;
+  std::string root_path_;
 };
-
-
 
 int main(int argc, char* argv[]) {
-  std::string server_config = R"(
-{
-    "http_server": {
-      "file_download_path" : ".",
-      "file_upload_path" : "upload",
-      "port" : 1443,
-      "ssl" : 1,
-      "cert_crt": "x509.crt",
-      "cert_key": "x509.key"
-    }
-}
-)";
-
-  Json::Value json_config; 
-  int ret = -1;
-  int port = -1;
-  int ssl = 0;
   struct event_base *ev_base = NULL;
-  std::shared_ptr<HttpServer::DefaultHandlerFactory> default_handler_factory;
-  std::shared_ptr<HttpServer::Server> server(new HttpServer::Server());
-
-  if (JsonParser::ParseFromString(server_config, json_config)) {
-    tunolog(tunogetmsg());
-    goto finally;
-  }
-
-  default_handler_factory = std::shared_ptr<HttpServer::DefaultHandlerFactory>(
-      new HttpServer::DefaultHandlerFactory(
-        std::shared_ptr<Http::ContentHandlerFactory>(new CustomContentHandlerFactory(json_config))
-  ));
-
-  tunolog("json_config", json_config["http_server"]["static_file_path"].asString().c_str());
-  tunolog("\tstatic_file_path: %s", json_config["http_server"]["static_file_path"].asString().c_str());
-  tunolog("\tport: %d", json_config["http_server"]["port"].asInt());
-  tunolog("\tssl: %d", json_config["http_server"]["ssl"].asInt());
-  tunolog("\tcert_crt: %s", json_config["http_server"]["cert_crt"].asString().c_str());
-  tunolog("\tcert_key: %s", json_config["http_server"]["cert_key"].asString().c_str());
 
   if (tuno_sys_socket_init()) {
     tunolog("failed to socket_library_init()");
-    goto finally;
+    return -1;
   }
-
-  if (argc >= 2 && argc <= 3) {
-    if (argc == 3) {
-      ssl = atoi(argv[2]);
-    }
-    port = atoi(argv[1]);
-  } else {
-     ssl = json_config["http_server"]["ssl"].asInt();
-     port = json_config["http_server"]["port"].asInt();
-  }
-
-  tunolog("ssl:%d port:%d\n", ssl, port);
 
   if ((ev_base = event_base_new()) == NULL) {
     tunolog("failed to event_base_new()");
-    goto finally;
+    return -1;
   }
 
-  if (server->Init(ev_base, default_handler_factory)) {
-    tunosetmsg2();
-    tunolog(tunogetmsg());
-    goto finally;
-  }
+  /**
+   * test commnad:
+   *    ./runtime.linux/bin/http_client 1
+   *    ./runtime.linux/bin/http_client 2
+   *    curl https://127.0.0.1:1443/index.htm -k
+   **/ 
 
-  if (server->Listen(
-        port
-        , ssl ? json_config["http_server"]["cert_crt"].asString() : ""
-        , ssl ? json_config["http_server"]["cert_key"].asString() : "")) {
-    tunosetmsg2();
-    tunolog(tunogetmsg());
-    goto finally;
-  }
+  std::shared_ptr<HttpServer::Router> router(new HttpServer::Router());
   
+  //with custom HandlerFactory. with custom Handler
+  router->Add(DownloadHandlerFactory::New(HttpServer::GET, "/dwload", "."));
+  
+  //with custom HandlerFactory. with custom Handler
+  router->Add(UploadHandlerFactory::New(HttpServer::GET, "/upload", "upload"));
+
+  //without custom HandlerFactory and custom Handler
+  const char *index_htm = "/index.htm";
+  router->AddHandlerCb(HttpServer::GET, index_htm
+    , [&](std::shared_ptr<HttpServer::Context> context, std::string &response) -> int {
+   
+      //write head
+      if (!context->writer()->IsHeadDone()) {
+        context->writer()->Outstream()->WritePrintf("HTTP/1.1 %d OK\r\n", 200);
+        context->writer()->Outstream()->WritePrintf("Content-Type: %s\r\n", "text/html");
+        context->writer()->Outstream()->WritePrintf("Content-Length: 13\r\n\r\n");
+        context->writer()->HeadDone();
+      }
+
+      //write body
+      if (!context->writer()->IsBodyDone()) {
+        context->writer()->Outstream()->WritePrintf("HELLO WORLD!\n");
+        context->writer()->HeadDone();
+      }
+
+      return 0;
+    }
+  );
+
+  bool ssl = true;
+  int port = 1443;
+  std::string cert_crt = "x509.crt";
+  std::string cert_key = "x509.key";
+  int timeout_sec = 10;
+  int timeout_usec = 0;
+
+  auto server = HttpServer::Server::Listen(
+        ev_base
+        , router
+        , port
+        , ssl ? cert_crt : ""
+        , ssl ? cert_key : ""
+        , timeout_sec
+        , timeout_usec);
+  if (server.get() == nullptr) {
+    tunosetmsg2();
+    tunolog(tunogetmsg());
+    return -1;
+  }
+
+  int ret;
   if ((ret = event_base_dispatch(ev_base))) {
     tunolog("ret NOT zero: %d", ret);
 #ifdef __WIN32__
     tunolog("WSAGetLastError %d", WSAGetLastError());
 #endif
   }
-finally:
+
   if (ev_base) {
     event_base_free(ev_base);
   }
