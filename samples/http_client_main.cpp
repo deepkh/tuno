@@ -214,8 +214,8 @@ int main(int argc, char* argv[]) {
      download_index_htm = HttpClient::Connection::Connect(ev_base, 
       HttpClient::Handler::New(
         HttpClient::PUT, HttpClient::URL::Parse("https://127.0.0.1:1443/index.htm"
-                              , "/etc/ssl/certs/ca-certificates.crt"
-                              , false)
+                              , "x509.crt"
+                              , true)
         , [&](std::shared_ptr<HttpClient::Context> context, std::string &response) -> int {
       
           //request (could add custom request headers here)
@@ -250,8 +250,8 @@ int main(int argc, char* argv[]) {
      download_by_content_length = HttpClient::Connection::Connect(ev_base, 
       DownloadHandler::New(
         HttpClient::URL::Parse("https://127.0.0.1:1443/dwload/test_file/10m.bin"
-                              , "/etc/ssl/certs/ca-certificates.crt"
-                              , false)
+                              , "x509.crt"
+                              , true)
         , "download"
       )
     );
@@ -269,8 +269,8 @@ int main(int argc, char* argv[]) {
     upload_by_content_length = HttpClient::Connection::Connect(ev_base, 
       UploadHandler::New(
         HttpClient::URL::Parse("https://127.0.0.1:1443/upload"
-                              , "/etc/ssl/certs/ca-certificates.crt"
-                              , false)
+                              , "x509.crt"
+                              , true)
         , "test_file/10m.bin"
       )
     );
@@ -288,8 +288,8 @@ int main(int argc, char* argv[]) {
     download_by_content_length_2 = HttpClient::Connection::Connect(ev_base, 
       DownloadHandler::New(
         HttpClient::URL::Parse("https://127.0.0.1:1443/dwload/test_file/10m.bin2"
-                              , "/etc/ssl/certs/ca-certificates.crt"
-                              , false)
+                              , "x509.crt"
+                              , true)
         , "download"
       )
     );
